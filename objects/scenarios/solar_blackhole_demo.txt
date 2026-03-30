@@ -1,6 +1,6 @@
-# Scenario demo per SpaceSim
-# Nota: questo file e solo un placeholder dati.
+# Formato:
+# name kind mass px py pz vx vy vz static eventHorizonRadius
 
-Sun mass=1.989e30 pos=(0,0,0) vel=(0,0,0) static=true
-Earth mass=5.972e24 pos=(1.496e11,0,0) vel=(0,29780,0) static=false
-BlackHole mass=8.0e30 pos=(-3.5e11,0,1.0e10) vel=(0,0,0) static=true
+Sun star 1.989e30 0 0 0 0 0 0 true 0
+Earth planet 5.972e24 1.496e11 0 0 0 29780 0 false 0
+BlackHole blackhole 8.0e30 -3.5e11 0 1.0e10 0 0 0 true 8.0e9

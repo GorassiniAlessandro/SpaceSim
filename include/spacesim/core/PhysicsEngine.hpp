@@ -1,16 +1,22 @@
 #pragma once
 
+#include <vector>
+
+#include "spacesim/core/SimulationConfig.hpp"
 #include "spacesim/core/World.hpp"
 
 namespace spacesim::core {
 
 class PhysicsEngine {
 public:
+    explicit PhysicsEngine(SimulationConfig config = {});
     void step(World& world, double dt) const;
 
 private:
-    static constexpr double kGravitationalConstant = 6.67430e-11;
-    static constexpr double kSoftening = 1e3;
+    [[nodiscard]] std::vector<Vec3> computeAccelerations(const std::vector<Body>& bodies) const;
+    void applyBlackHoleAbsorption(World& world) const;
+
+    SimulationConfig config_;
 };
 
 } // namespace spacesim::core
