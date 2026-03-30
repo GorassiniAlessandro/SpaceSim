@@ -53,12 +53,15 @@ Responsabilita:
 - [include/spacesim/render/IRenderer.hpp](include/spacesim/render/IRenderer.hpp): interfaccia comune dei renderer.
 - [include/spacesim/render/Renderer2D.hpp](include/spacesim/render/Renderer2D.hpp) + [src/render/Renderer2D.cpp](src/render/Renderer2D.cpp): vista 2D.
 - [include/spacesim/render/Renderer3D.hpp](include/spacesim/render/Renderer3D.hpp) + [src/render/Renderer3D.cpp](src/render/Renderer3D.cpp): vista 3D.
+- [include/spacesim/render/TerminalRenderCommon.hpp](include/spacesim/render/TerminalRenderCommon.hpp): canvas ASCII condiviso.
 
 Responsabilita:
 
 - leggere lo stato dal core,
 - visualizzare lo stesso scenario in due modalita diverse,
 - permettere switch runtime senza duplicare la fisica.
+
+Nota: il rendering attuale e una prima integrazione ASCII in terminale (2D ortografico e 3D prospettico). In una milestone successiva puo essere sostituito da backend grafici reali (SFML/OpenGL) mantenendo la stessa interfaccia `IRenderer`.
 
 ### 4) Dati/scenari
 
@@ -85,6 +88,12 @@ Per compilare servono:
 - make
 - Un compilatore C++20 (g++ o clang++)
 
+Per abilitare il backend finestra OpenGL servono anche:
+
+- pkg-config
+- GLFW 3 development files
+- libreria OpenGL di sistema
+
 ## Comandi previsti
 
 Una volta installati i prerequisiti, in terminale:
@@ -92,6 +101,13 @@ Una volta installati i prerequisiti, in terminale:
 ```bash
 make
 make run
+```
+
+Su Ubuntu/WSL puoi installare dipendenze OpenGL con:
+
+```bash
+sudo apt update
+sudo apt install -y pkg-config libglfw3-dev libgl1-mesa-dev
 ```
 
 ## Command Board Runtime
@@ -108,5 +124,32 @@ Durante `make run` puoi controllare la simulazione con questi comandi:
 - `m` oppure `metrics`: stampa energia cinetica/potenziale/totale e momento totale
 - `r`: ricarica lo scenario da file
 - `load <nome>`: carica `objects/scenarios/<nome>.txt` (esempio: `load binary_system`)
+- `gfx ascii`: usa il renderer ASCII in terminale
+- `gfx opengl`: usa il renderer OpenGL in finestra (se build supporta OpenGL)
 - `h`: mostra la guida comandi
 - `q`: termina il programma
+
+Quando usi `gfx opengl`, i comandi restano disponibili nella console terminale (`[console] ... >`) mentre la finestra e aperta.
+
+Hotkeys finestra OpenGL (equivalenti ai comandi terminale):
+
+- `Space`: `s` (single step)
+- `P`: `p` (pause/resume)
+- `2`: `2` (renderer 2D)
+- `3`: `3` (renderer 3D)
+- `+` o `Numpad +`: `+` (aumenta velocita)
+- `-` o `Numpad -`: `-` (riduce velocita)
+- `R`: `r` (reset scenario)
+- `M`: `m` (metriche)
+- `H`: `h` (help)
+- `Q` o `Esc`: `q` (esci)
+
+Controlli visuale (solo finestra OpenGL):
+
+- Vista 2D: `Frecce` pan, `U/O` zoom in/out, `C` reset camera
+- Vista 3D: `J/L` yaw, `I/K` pitch, `U/O` avvicina/allontana camera, `Frecce` pan, `Z/X` zoom scena, `C` reset camera
+
+Indicatori spaziali:
+
+- Vista 2D: griglia cartesiana con assi principali evidenziati
+- Vista 3D: griglia sul piano XZ + assi X/Y/Z colorati per percezione della profondita

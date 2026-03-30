@@ -1,15 +1,27 @@
 #include "spacesim/app/Application.hpp"
 
 #include <cmath>
+#include <chrono>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <thread>
+
+#if defined(__linux__) || defined(__APPLE__)
+#include <sys/select.h>
+#include <unistd.h>
+#endif
 
 #include "spacesim/core/ScenarioLoader.hpp"
 #include "spacesim/render/Renderer2D.hpp"
 #include "spacesim/render/Renderer3D.hpp"
+#include "spacesim/render/WindowCommandBridge.hpp"
+#ifdef SPACESIM_ENABLE_OPENGL
+#include "spacesim/render/Renderer2DOpenGL.hpp"
+#include "spacesim/render/Renderer3DOpenGL.hpp"
+#endif
 
 namespace spacesim::app {
 
@@ -25,19 +37,55 @@ std::string trim(const std::string& value) {
     return value.substr(first, last - first + 1);
 }
 
+std::unique_ptr<render::IRenderer> makeRenderer(RenderBackend backend, RenderMode mode) {
+#ifdef SPACESIM_ENABLE_OPENGL
+    if (backend == RenderBackend::OpenGL) {
+        if (mode == RenderMode::TwoD) {
+            return std::make_unique<render::Renderer2DOpenGL>();
+        }
+        return std::make_unique<render::Renderer3DOpenGL>();
+    }
+#else
+    (void)backend;
+#endif
+
+    if (mode == RenderMode::TwoD) {
+        return std::make_unique<render::Renderer2D>();
+    }
+    return std::make_unique<render::Renderer3D>();
+}
+
+bool hasStdinInputAvailable() {
+#if defined(__linux__) || defined(__APPLE__)
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(STDIN_FILENO, &readfds);
+    timeval tv{};
+    tv.tv_sec = 0;
+    tv.tv_usec = 0;
+    const int result = select(STDIN_FILENO + 1, &readfds, nullptr, nullptr, &tv);
+    return result > 0 && FD_ISSET(STDIN_FILENO, &readfds);
+#else
+    return std::cin.rdbuf()->in_avail() > 0;
+#endif
+}
+
 } // namespace
 
 Application::Application()
         : physics_(config_),
-            renderer_(std::make_unique<render::Renderer2D>()),
+            renderer_(nullptr),
       mode_(RenderMode::TwoD),
+      backend_(RenderBackend::Ascii),
       running_(true),
       paused_(true),
       stepRequested_(false),
       timeScale_(1.0),
+    commandPromptShown_(false),
       currentScenario_("solar_blackhole_demo"),
       totalAbsorbedBodies_(0),
       totalAbsorbedMass_(0.0) {
+        renderer_ = makeRenderer(backend_, mode_);
         loadInitialScenario();
 }
 
@@ -46,6 +94,7 @@ void Application::run() {
     printCommandBoard();
 
     while (running_) {
+        processWindowCommands();
         processInput();
         if (!running_) {
             break;
@@ -67,13 +116,30 @@ void Application::run() {
                 }
             }
 
+        }
+
+        const bool shouldRender = (backend_ == RenderBackend::OpenGL) || shouldStep;
+        if (shouldRender) {
             renderer_->render(world_);
         }
 
         stepRequested_ = false;
+        if (backend_ == RenderBackend::OpenGL) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        }
     }
 
     std::cout << "SpaceSim terminato.\n";
+}
+
+void Application::processWindowCommands() {
+    std::string windowCommand;
+    while (render::window_commands::tryPop(windowCommand)) {
+        executeCommand(windowCommand);
+        if (!running_) {
+            break;
+        }
+    }
 }
 
 void Application::loadInitialScenario() {
@@ -144,9 +210,32 @@ void Application::seedFallbackBodies() {
 }
 
 void Application::processInput() {
+    if (backend_ == RenderBackend::OpenGL) {
+        if (!commandPromptShown_) {
+            std::cout << "\n[console] (" << (paused_ ? "paused" : "running") << ", x"
+                      << timeScale_ << ") > " << std::flush;
+            commandPromptShown_ = true;
+        }
+
+        if (!hasStdinInputAvailable()) {
+            return;
+        }
+
+        std::string input;
+        std::getline(std::cin, input);
+        commandPromptShown_ = false;
+        executeCommand(input);
+        return;
+    }
+
     std::cout << "\n(" << (paused_ ? "paused" : "running") << ", x" << timeScale_ << ") > ";
     std::string input;
     std::getline(std::cin, input);
+    executeCommand(input);
+}
+
+void Application::executeCommand(const std::string& rawInput) {
+    const std::string input = trim(rawInput);
 
     if (input.empty() || input == "s") {
         stepRequested_ = true;
@@ -223,6 +312,16 @@ void Application::processInput() {
         return;
     }
 
+    if (input == "gfx ascii") {
+        switchBackend(RenderBackend::Ascii);
+        return;
+    }
+
+    if (input == "gfx opengl") {
+        switchBackend(RenderBackend::OpenGL);
+        return;
+    }
+
     std::cout << "Comando non riconosciuto. Digita h per help.\n";
 }
 
@@ -233,12 +332,36 @@ void Application::switchMode(RenderMode mode) {
 
     mode_ = mode;
     if (mode_ == RenderMode::TwoD) {
-        renderer_ = std::make_unique<render::Renderer2D>();
+        renderer_ = makeRenderer(backend_, RenderMode::TwoD);
     } else {
-        renderer_ = std::make_unique<render::Renderer3D>();
+        renderer_ = makeRenderer(backend_, RenderMode::ThreeD);
     }
 
     std::cout << "Modalita cambiata a " << renderer_->name() << "\n";
+}
+
+void Application::switchBackend(RenderBackend backend) {
+    if (backend == backend_) {
+        return;
+    }
+
+#ifndef SPACESIM_ENABLE_OPENGL
+    if (backend == RenderBackend::OpenGL) {
+        std::cout << "Backend OpenGL non disponibile in questa build.\n";
+        return;
+    }
+#endif
+
+    backend_ = backend;
+    renderer_ = makeRenderer(backend_, mode_);
+    commandPromptShown_ = false;
+    if (backend_ == RenderBackend::OpenGL) {
+        // Force at least one frame so the window is created even if simulation is paused.
+        stepRequested_ = true;
+        std::cout << "Console comandi attiva nel terminale mentre la finestra e aperta.\n";
+    }
+    std::cout << "Backend grafico cambiato: "
+              << (backend_ == RenderBackend::Ascii ? "ASCII" : "OpenGL") << "\n";
 }
 
 void Application::printCommandBoard() const {
@@ -253,14 +376,20 @@ void Application::printCommandBoard() const {
               << "  m            -> mostra metriche fisiche (energia e momento)\n"
               << "  r            -> ricarica lo scenario dal file\n"
               << "  load <nome>  -> carica uno scenario da objects/scenarios/<nome>.txt\n"
+              << "  gfx ascii    -> usa renderer ASCII in terminale\n"
+              << "  gfx opengl   -> usa renderer OpenGL in finestra\n"
               << "  h            -> mostra questa guida\n"
-              << "  q            -> esci\n";
+              << "  q            -> esci\n"
+              << "Hotkeys visuale in finestra OpenGL:\n"
+              << "  2D: frecce=pan, U/O=zoom, C=reset camera\n"
+              << "  3D: J/L=yaw, I/K=pitch, U/O=dolly, frecce=pan, Z/X=zoom, C=reset camera\n";
 }
 
 void Application::printStatus() const {
     std::cout << "Stato simulazione:\n"
               << "  renderer: " << renderer_->name() << "\n"
               << "  paused: " << (paused_ ? "true" : "false") << "\n"
+              << "  backend: " << (backend_ == RenderBackend::Ascii ? "ASCII" : "OpenGL") << "\n"
               << "  timeScale: x" << timeScale_ << "\n"
               << "  dt base: " << config_.fixedTimeStepSeconds << " s\n"
               << "  scenario: " << currentScenario_ << "\n"
