@@ -5,10 +5,14 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <iomanip>
 #include <iostream>
+#include <limits>
+#include <sstream>
 
 #include <GLFW/glfw3.h>
 
+#include "spacesim/render/HudState.hpp"
 #include "spacesim/render/WindowCommandBridge.hpp"
 
 namespace spacesim::render {
@@ -82,40 +86,63 @@ void drawDisk(float innerRadius, float outerRadius, int segments = 32) {
     glEnd();
 }
 
-// Disegna una freccia dal punto start al punto end
+// Disegna una freccia robusta: asta + due alette finali ben visibili.
 void drawArrow(float startX, float startY, float startZ, float endX, float endY, float endZ, float arrowSize = 0.1f) {
+    const float dx = endX - startX;
+    const float dy = endY - startY;
+    const float dz = endZ - startZ;
+    const float len = std::sqrt((dx * dx) + (dy * dy) + (dz * dz));
+    if (len < 1e-6f) {
+        return;
+    }
+
+    const float ux = dx / len;
+    const float uy = dy / len;
+    const float uz = dz / len;
+
+    // Asse di appoggio per costruire un vettore perpendicolare stabile.
+    float ax = 0.0f;
+    float ay = 1.0f;
+    float az = 0.0f;
+    if (std::abs(uy) > 0.95f) {
+        ax = 1.0f;
+        ay = 0.0f;
+    }
+
+    // perp = u x a
+    float px = (uy * az) - (uz * ay);
+    float py = (uz * ax) - (ux * az);
+    float pz = (ux * ay) - (uy * ax);
+    float plen = std::sqrt((px * px) + (py * py) + (pz * pz));
+    if (plen < 1e-6f) {
+        return;
+    }
+    px /= plen;
+    py /= plen;
+    pz /= plen;
+
+    const float headLen = arrowSize;
+    const float headWidth = arrowSize * 0.55f;
+
     // Linea principale
     glBegin(GL_LINES);
     glVertex3f(startX, startY, startZ);
     glVertex3f(endX, endY, endZ);
+
+    // Aletta 1
+    glVertex3f(endX, endY, endZ);
+    glVertex3f(
+        endX - (ux * headLen) + (px * headWidth),
+        endY - (uy * headLen) + (py * headWidth),
+        endZ - (uz * headLen) + (pz * headWidth));
+
+    // Aletta 2
+    glVertex3f(endX, endY, endZ);
+    glVertex3f(
+        endX - (ux * headLen) - (px * headWidth),
+        endY - (uy * headLen) - (py * headWidth),
+        endZ - (uz * headLen) - (pz * headWidth));
     glEnd();
-    
-    // Punta della freccia (cone semplice)
-    glPushMatrix();
-    glTranslatef(endX, endY, endZ);
-    
-    // Direzione della freccia
-    float dx = endX - startX;
-    float dy = endY - startY;
-    float dz = endZ - startZ;
-    float len = std::sqrt(dx*dx + dy*dy + dz*dz);
-    
-    if (len > 0.001f) {
-        dx /= len;
-        dy /= len;
-        dz /= len;
-        
-        // Piccolo cono come punta
-        glBegin(GL_TRIANGLES);
-        // Base del cono (tre vertici)
-        const float coneBase = arrowSize * 0.15f;
-        glVertex3f(0, 0, 0);
-        glVertex3f(coneBase * dy, coneBase * dz, -coneBase * dx);
-        glVertex3f(-coneBase * dy, -coneBase * dz, coneBase * dx);
-        glEnd();
-    }
-    
-    glPopMatrix();
 }
 
 } // namespace
@@ -125,6 +152,7 @@ struct Renderer3DOpenGL::Impl {
     bool initFailed = false;
     bool closeCommandSent = false;
     std::array<unsigned char, GLFW_KEY_LAST + 1> keyDown{};
+    unsigned int hudFrameCounter = 0;
     float yawDeg = 35.0f;
     float pitchDeg = 20.0f;
     float cameraDistance = 3.5f;
@@ -207,6 +235,13 @@ void Renderer3DOpenGL::render(const core::World& world) {
     queueKey(GLFW_KEY_H, "h");
     queueKey(GLFW_KEY_ESCAPE, "q");
     queueKey(GLFW_KEY_Q, "q");
+    
+    // Scorciatoie HUD: Numpad 1-4 per toggle pannelli, Tab per on/off
+    queueKey(GLFW_KEY_KP_1, "hub toggle overview");
+    queueKey(GLFW_KEY_KP_2, "hub toggle kinematics");
+    queueKey(GLFW_KEY_KP_3, "hub toggle distance");
+    queueKey(GLFW_KEY_KP_4, "hub toggle energy");
+    queueKey(GLFW_KEY_TAB, "hub toggle-all");
 
     if (glfwGetKey(impl_->window, GLFW_KEY_J) == GLFW_PRESS) {
         impl_->yawDeg -= 1.2f;
@@ -286,6 +321,7 @@ void Renderer3DOpenGL::render(const core::World& world) {
 
     const auto& bodies = world.bodies();
     if (bodies.empty()) {
+        glfwSetWindowTitle(impl_->window, "SpaceSim OpenGL 3D | N:0");
         glfwSwapBuffers(impl_->window);
         return;
     }
@@ -308,6 +344,59 @@ void Renderer3DOpenGL::render(const core::World& world) {
         const double dy = body.position.y - centerY;
         const double dz = body.position.z - centerZ;
         maxRadius = std::max(maxRadius, std::sqrt((dx * dx) + (dy * dy) + (dz * dz)));
+    }
+
+    // HUD live: metriche essenziali aggiornate periodicamente nel titolo finestra.
+    if ((impl_->hudFrameCounter++ % 10U) == 0U) {
+        const bool hubEnabled = hud::isEnabled();
+
+        double totalMass = 0.0;
+        double totalKinetic = 0.0;
+        double sumSpeed = 0.0;
+        double maxSpeedValue = 0.0;
+        double minDistance = std::numeric_limits<double>::infinity();
+
+        for (const auto& body : bodies) {
+            const double speed = body.velocity.length();
+            totalMass += body.mass;
+            sumSpeed += speed;
+            maxSpeedValue = std::max(maxSpeedValue, speed);
+            totalKinetic += 0.5 * body.mass * speed * speed;
+        }
+
+        for (std::size_t i = 0; i < bodies.size(); ++i) {
+            for (std::size_t j = i + 1; j < bodies.size(); ++j) {
+                const core::Vec3 delta = bodies[j].position - bodies[i].position;
+                minDistance = std::min(minDistance, delta.length());
+            }
+        }
+        if (!std::isfinite(minDistance)) {
+            minDistance = 0.0;
+        }
+
+        const double avgSpeed = sumSpeed / static_cast<double>(bodies.size());
+
+        std::ostringstream hudTitle;
+        hudTitle << "SpaceSim OpenGL 3D"
+                 << " | HUB:" << (hubEnabled ? "on" : "off");
+
+        if (hubEnabled) {
+            if (hud::isPanelEnabled(hud::Panel::Overview)) {
+                hudTitle << " | N:" << bodies.size();
+            }
+            if (hud::isPanelEnabled(hud::Panel::Kinematics)) {
+                hudTitle << " | v_avg:" << std::fixed << std::setprecision(2) << (avgSpeed / 1000.0) << " km/s"
+                         << " | v_max:" << std::fixed << std::setprecision(2) << (maxSpeedValue / 1000.0) << " km/s";
+            }
+            if (hud::isPanelEnabled(hud::Panel::Distance)) {
+                hudTitle << " | d_min:" << std::fixed << std::setprecision(3) << (minDistance / 1.0e9) << " Gm";
+            }
+            if (hud::isPanelEnabled(hud::Panel::Energy)) {
+                hudTitle << " | Ek:" << std::scientific << std::setprecision(3) << totalKinetic << " J";
+            }
+        }
+
+        glfwSetWindowTitle(impl_->window, hudTitle.str().c_str());
     }
 
     const double inv = (1.0 / maxRadius) * impl_->zoom;
@@ -451,113 +540,156 @@ void Renderer3DOpenGL::render(const core::World& world) {
         glPopMatrix();
     }
 
-    // Renderizza vettori di velocità e traiettoria predetta
-    // Solo per i primi 2 corpi per chiarezza
-    int bodyCount = 0;
+    // Renderizza vettori di velocita/gravita e traiettoria predetta.
+    // Disegno in overlay (senza depth test) per evitare che sfere/griglia nascondano i vettori.
+    const double G = 6.67430e-11;
+    const double c2 = 299792458.0 * 299792458.0;
+    const double softeningSq = 1e8;
+
+    const auto computeAccelAt = [&](const core::Body& self,
+                                    const core::Vec3& pos,
+                                    const core::Vec3& vel) {
+        core::Vec3 totalAccel{};
+        for (const auto& other : bodies) {
+            if (other.name == self.name) {
+                continue;
+            }
+
+            const core::Vec3 delta = other.position - pos;
+            const double distanceSq = delta.lengthSquared() + softeningSq;
+            const double distance = std::sqrt(distanceSq);
+            if (distance <= 0.0) {
+                continue;
+            }
+
+            double correction = 1.0;
+            const core::Vec3 vRel = vel - other.velocity;
+            const core::Vec3 h = cross(delta, vRel);
+            const double h2 = h.lengthSquared();
+            correction += (3.0 * h2) / (distanceSq * c2);
+
+            const double accelMag = ((G * other.mass) / distanceSq) * correction;
+            totalAccel += delta * (accelMag / distance);
+        }
+        return totalAccel;
+    };
+
+    double totalMass = 0.0;
+    core::Vec3 comVelocity{};
     for (const auto& body : bodies) {
-        if (bodyCount >= 2 || body.isStatic) {
-            bodyCount++;
+        totalMass += body.mass;
+        comVelocity += body.velocity * body.mass;
+    }
+    if (totalMass > 0.0) {
+        comVelocity *= (1.0 / totalMass);
+    }
+
+    double maxSpeed = 0.0;
+    double maxAccel = 0.0;
+    for (const auto& body : bodies) {
+        const core::Vec3 relVelocity = body.velocity - comVelocity;
+        maxSpeed = std::max(maxSpeed, relVelocity.length());
+        maxAccel = std::max(maxAccel, computeAccelAt(body, body.position, body.velocity).length());
+    }
+
+    if (maxSpeed < 1e-9) {
+        maxSpeed = 1.0;
+    }
+    if (maxAccel < 1e-15) {
+        maxAccel = 1.0;
+    }
+
+    glDisable(GL_DEPTH_TEST);
+
+    int renderedDynamicBodies = 0;
+    for (const auto& body : bodies) {
+        if (body.isStatic) {
             continue;
+        }
+        if (renderedDynamicBodies >= 6) {
+            break;
         }
 
         const float x = static_cast<float>((body.position.x - centerX) * inv);
         const float y = static_cast<float>((body.position.y - centerY) * inv);
         const float z = static_cast<float>((body.position.z - centerZ) * inv);
 
-        // Vettore di velocità (verde)
-        const float velScale = 1e-6f;  // Aumentato per visibilità
-        const float velX = x + static_cast<float>(body.velocity.x * velScale * inv);
-        const float velY = y + static_cast<float>(body.velocity.y * velScale * inv);
-        const float velZ = z + static_cast<float>(body.velocity.z * velScale * inv);
-        
+        const core::Vec3 relVelocity = body.velocity - comVelocity;
+        const core::Vec3 accelNow = computeAccelAt(body, body.position, body.velocity);
+
+        // Lunghezze vettori in unita schermo con scala adattiva e minimo visibile.
+        const double speedRatio = relVelocity.length() / maxSpeed;
+        const double accelRatio = accelNow.length() / maxAccel;
+        const float velLen = static_cast<float>(std::max(0.10, 0.45 * speedRatio));
+        const float accLen = static_cast<float>(std::max(0.10, 0.45 * accelRatio));
+
+        core::Vec3 velDir = relVelocity;
+        const double velMag = velDir.length();
+        if (velMag > 1e-12) {
+            velDir *= (1.0 / velMag);
+        }
+
+        core::Vec3 accDir = accelNow;
+        const double accMag = accDir.length();
+        if (accMag > 1e-18) {
+            accDir *= (1.0 / accMag);
+        }
+
+        // Vettore velocita (verde)
         glLineWidth(2.0f);
         glColor3f(0.2f, 1.0f, 0.2f);
-        drawArrow(x, y, z, velX, velY, velZ, 0.05f);
-        glLineWidth(1.0f);
+        drawArrow(
+            x,
+            y,
+            z,
+            x + static_cast<float>(velDir.x) * velLen,
+            y + static_cast<float>(velDir.y) * velLen,
+            z + static_cast<float>(velDir.z) * velLen,
+            0.06f);
 
-        // Calcola accelerazione gravitazionale dovuta a tutti gli altri corpi
-        spacesim::core::Vec3 totalAccel{0, 0, 0};
-        const double G = 6.67430e-11;
-        const double c2 = 299792458.0 * 299792458.0;
-        
-        for (const auto& other : bodies) {
-            if (other.name == body.name) continue;
-            
-            const spacesim::core::Vec3 delta = other.position - body.position;
-            const double distanceSq = delta.lengthSquared() + 1e6;
-            const double distance = std::sqrt(distanceSq);
-            
-            if (distance > 0) {
-                double correction = 1.0;
-                const spacesim::core::Vec3 vRel = body.velocity - other.velocity;
-                const spacesim::core::Vec3 h = cross(delta, vRel);
-                const double h2 = h.lengthSquared();
-                if (c2 > 0.0) correction += (3.0 * h2) / (distanceSq * c2);
-                
-                const double accelMag = ((G * other.mass) / distanceSq) * correction;
-                totalAccel += delta * (static_cast<float>(accelMag / distance));
-            }
-        }
-        
-        // Vettore di accelerazione (rosso)
-        const float accelScale = 1e-10f;  // Aumentato per visibilità
-        const float accelX = x + static_cast<float>(totalAccel.x * accelScale * inv);
-        const float accelY = y + static_cast<float>(totalAccel.y * accelScale * inv);
-        const float accelZ = z + static_cast<float>(totalAccel.z * accelScale * inv);
-        
-        glLineWidth(2.0f);
+        // Vettore accelerazione gravitazionale (rosso)
         glColor3f(1.0f, 0.2f, 0.2f);
-        drawArrow(x, y, z, accelX, accelY, accelZ, 0.05f);
+        drawArrow(
+            x,
+            y,
+            z,
+            x + static_cast<float>(accDir.x) * accLen,
+            y + static_cast<float>(accDir.y) * accLen,
+            z + static_cast<float>(accDir.z) * accLen,
+            0.06f);
         glLineWidth(1.0f);
 
-        // Traiettoria predetta (simula i prossimi 100 passi)
-        spacesim::core::Vec3 pos = body.position;
-        spacesim::core::Vec3 vel = body.velocity;
-        const double dt = 0.5;
-        const int predictionSteps = 100;
-        
-        glColor3f(0.5f, 0.8f, 1.0f);
-        glLineWidth(1.5f);
+        // Traiettoria predetta con orizzonte adattivo (frazione del periodo orbitale).
+        core::Vec3 pos = body.position;
+        core::Vec3 vel = body.velocity;
+        const double r = (body.position - core::Vec3{centerX, centerY, centerZ}).length();
+        const double v = std::max(body.velocity.length(), 1.0);
+        const double orbitalPeriodEstimate = std::max((2.0 * 3.1415926535 * r) / v, 3600.0);
+        const double horizonTime = std::min(orbitalPeriodEstimate * 0.60, 365.0 * 24.0 * 3600.0);
+        const int predictionSteps = 220;
+        const double dtPred = horizonTime / static_cast<double>(predictionSteps);
+
+        glColor3f(0.50f, 0.80f, 1.00f);
+        glLineWidth(2.0f);
         glBegin(GL_LINE_STRIP);
-        
+        glVertex3f(x, y, z);
         for (int step = 0; step < predictionSteps; ++step) {
-            // Calcola accelerazione per questa posizione
-            spacesim::core::Vec3 accel{0, 0, 0};
-            for (const auto& other : bodies) {
-                if (other.name == body.name) continue;
-                
-                const spacesim::core::Vec3 delta = other.position - pos;
-                const double distanceSq = delta.lengthSquared() + 1e6;
-                const double distance = std::sqrt(distanceSq);
-                
-                if (distance > 0) {
-                    double correction = 1.0;
-                    const spacesim::core::Vec3 vRel = vel - other.velocity;
-                    const spacesim::core::Vec3 h = cross(delta, vRel);
-                    const double h2 = h.lengthSquared();
-                    if (c2 > 0.0) correction += (3.0 * h2) / (distanceSq * c2);
-                    
-                    const double accelMag = ((G * other.mass) / distanceSq) * correction;
-                    accel += delta * (accelMag / distance);
-                }
-            }
-            
-            // Velocity-Verlet step
-            pos += vel * dt + accel * (0.5 * dt * dt);
-            vel += accel * dt;
-            
-            // Disegna punto della traiettoria
+            const core::Vec3 accel = computeAccelAt(body, pos, vel);
+            pos += vel * dtPred + accel * (0.5 * dtPred * dtPred);
+            vel += accel * dtPred;
+
             const float px = static_cast<float>((pos.x - centerX) * inv);
             const float py = static_cast<float>((pos.y - centerY) * inv);
             const float pz = static_cast<float>((pos.z - centerZ) * inv);
             glVertex3f(px, py, pz);
         }
-        
         glEnd();
         glLineWidth(1.0f);
 
-        bodyCount++;
+        renderedDynamicBodies++;
     }
+
+    glEnable(GL_DEPTH_TEST);
 
     glfwSwapBuffers(impl_->window);
 }

@@ -15,6 +15,7 @@
 #endif
 
 #include "spacesim/core/ScenarioLoader.hpp"
+#include "spacesim/render/HudState.hpp"
 #include "spacesim/render/Renderer2D.hpp"
 #include "spacesim/render/Renderer3D.hpp"
 #include "spacesim/render/WindowCommandBridge.hpp"
@@ -67,6 +68,26 @@ const char* gravityModelName(core::GravityModel model) {
     default:
         return "Newtonian";
     }
+}
+
+bool parseHubPanel(const std::string& token, render::hud::Panel& panel) {
+    if (token == "overview") {
+        panel = render::hud::Panel::Overview;
+        return true;
+    }
+    if (token == "kin" || token == "kinematics") {
+        panel = render::hud::Panel::Kinematics;
+        return true;
+    }
+    if (token == "distance" || token == "dist") {
+        panel = render::hud::Panel::Distance;
+        return true;
+    }
+    if (token == "energy" || token == "ek") {
+        panel = render::hud::Panel::Energy;
+        return true;
+    }
+    return false;
 }
 
 bool hasStdinInputAvailable() {
@@ -316,6 +337,115 @@ void Application::executeCommand(const std::string& rawInput) {
         return;
     }
 
+    if (input == "hub") {
+        std::cout << "Hub interattivo:\n"
+                  << "  hub on/off                 -> abilita o disabilita HUD live\n"
+                  << "  hub show <panel|all>       -> mostra pannello\n"
+                  << "  hub hide <panel|all>       -> nasconde pannello\n"
+                  << "  hub toggle <panel|all>     -> toggle pannello\n"
+                  << "  hub toggle-all             -> toggle on/off HUD intero\n"
+                  << "  hub reset                  -> reset pannelli default\n"
+                  << "  hub status                 -> stato attuale hub\n"
+                  << "  panel validi: overview | kin | distance | energy\n"
+                  << "  Scorciatoie tastiera in OpenGL:\n"
+                  << "    Numpad 1 = toggle Overview\n"
+                  << "    Numpad 2 = toggle Kinematics\n"
+                  << "    Numpad 3 = toggle Distance\n"
+                  << "    Numpad 4 = toggle Energy\n"
+                  << "    Tab = toggle HUD on/off\n"
+                  << "  stato: " << render::hud::summary() << "\n";
+        return;
+    }
+
+    if (input.rfind("hub ", 0) == 0) {
+        const std::string cmd = trim(input.substr(4));
+
+        if (cmd == "on") {
+            render::hud::setEnabled(true);
+            std::cout << "Hub attivato. " << render::hud::summary() << "\n";
+            return;
+        }
+        if (cmd == "off") {
+            render::hud::setEnabled(false);
+            std::cout << "Hub disattivato. " << render::hud::summary() << "\n";
+            return;
+        }
+        if (cmd == "reset") {
+            render::hud::resetDefaults();
+            std::cout << "Hub resettato. " << render::hud::summary() << "\n";
+            return;
+        }
+        if (cmd == "status") {
+            std::cout << "Stato hub: " << render::hud::summary() << "\n";
+            return;
+        }
+
+        if (cmd.rfind("show ", 0) == 0 || cmd.rfind("hide ", 0) == 0) {
+            const bool enable = cmd.rfind("show ", 0) == 0;
+            const std::string arg = trim(cmd.substr(5));
+
+            if (arg == "all") {
+                render::hud::setPanelEnabled(render::hud::Panel::Overview, enable);
+                render::hud::setPanelEnabled(render::hud::Panel::Kinematics, enable);
+                render::hud::setPanelEnabled(render::hud::Panel::Distance, enable);
+                render::hud::setPanelEnabled(render::hud::Panel::Energy, enable);
+                std::cout << "Hub aggiornato. " << render::hud::summary() << "\n";
+                return;
+            }
+
+            render::hud::Panel panel{};
+            if (!parseHubPanel(arg, panel)) {
+                std::cout << "Panel non valido. Usa: overview | kin | distance | energy | all\n";
+                return;
+            }
+
+            render::hud::setPanelEnabled(panel, enable);
+            std::cout << "Hub aggiornato. " << render::hud::summary() << "\n";
+            return;
+        }
+
+        if (cmd == "toggle-all") {
+            const bool hubCurrentlyEnabled = render::hud::isEnabled();
+            render::hud::setEnabled(!hubCurrentlyEnabled);
+            std::cout << "Hub " << (hubCurrentlyEnabled ? "disattivato" : "attivato") << ". " 
+                      << render::hud::summary() << "\n";
+            return;
+        }
+
+        if (cmd.rfind("toggle ", 0) == 0) {
+            const std::string arg = trim(cmd.substr(7));
+
+            if (arg == "all") {
+                // Toggle tutti i pannelli
+                const bool overview = render::hud::isPanelEnabled(render::hud::Panel::Overview);
+                const bool kinematics = render::hud::isPanelEnabled(render::hud::Panel::Kinematics);
+                const bool distance = render::hud::isPanelEnabled(render::hud::Panel::Distance);
+                const bool energy = render::hud::isPanelEnabled(render::hud::Panel::Energy);
+                
+                render::hud::setPanelEnabled(render::hud::Panel::Overview, !overview);
+                render::hud::setPanelEnabled(render::hud::Panel::Kinematics, !kinematics);
+                render::hud::setPanelEnabled(render::hud::Panel::Distance, !distance);
+                render::hud::setPanelEnabled(render::hud::Panel::Energy, !energy);
+                std::cout << "Hub aggiornato. " << render::hud::summary() << "\n";
+                return;
+            }
+
+            render::hud::Panel panel{};
+            if (!parseHubPanel(arg, panel)) {
+                std::cout << "Panel non valido. Usa: overview | kin | distance | energy | all\n";
+                return;
+            }
+
+            const bool currentState = render::hud::isPanelEnabled(panel);
+            render::hud::setPanelEnabled(panel, !currentState);
+            std::cout << "Hub aggiornato. " << render::hud::summary() << "\n";
+            return;
+        }
+
+        std::cout << "Comando hub non valido. Digita 'hub' per la guida hub.\n";
+        return;
+    }
+
     if (input.rfind("phys ", 0) == 0) {
         const std::string mode = trim(input.substr(5));
         if (mode == "newton" || mode == "newtonian") {
@@ -408,6 +538,12 @@ void Application::printCommandBoard() const {
               << "  -            -> dimezza velocita simulazione\n"
               << "  st           -> mostra stato corrente\n"
               << "  m            -> mostra metriche fisiche (energia e momento)\n"
+              << "  hub          -> guida hub interattivo (metriche live separate)\n"
+              << "  hub on/off   -> abilita/disabilita HUD live\n"
+              << "  hub show/hide <overview|kin|distance|energy|all>\n"
+              << "  hub toggle <overview|kin|distance|energy|all>  -> toggle singolo pannello\n"
+              << "  hub toggle-all   -> toggle on/off HUD\n"
+              << "  hub status   -> stato hub corrente\n"
               << "  phys <mode>  -> cambia modello fisico: newton | galileo | rel | hybrid\n"
               << "  r            -> ricarica lo scenario dal file\n"
               << "  load <nome>  -> carica uno scenario da objects/scenarios/<nome>.txt\n"
@@ -418,7 +554,9 @@ void Application::printCommandBoard() const {
               << "  q            -> esci\n"
               << "Hotkeys visuale in finestra OpenGL:\n"
               << "  2D: frecce=pan, U/O=zoom, C=reset camera\n"
-              << "  3D: J/L=yaw, I/K=pitch, U/O=dolly, frecce=pan, Z/X=zoom, C=reset camera\n";
+              << "  3D: J/L=yaw, I/K=pitch, U/O=dolly, frecce=pan, Z/X=zoom, C=reset camera\n"
+              << "  Numpad 1/2/3/4: toggle pannelli HUD (Overview/Kinematics/Distance/Energy)\n"
+              << "  Tab: toggle on/off HUD\n";
 }
 
 void Application::printStatus() const {
@@ -432,7 +570,8 @@ void Application::printStatus() const {
               << "  scenario: " << currentScenario_ << "\n"
               << "  corpi attivi: " << world_.bodies().size() << "\n"
               << "  assorbimenti totali: " << totalAbsorbedBodies_ << "\n"
-              << "  massa assorbita totale: " << totalAbsorbedMass_ << "\n";
+              << "  massa assorbita totale: " << totalAbsorbedMass_ << "\n"
+              << "  hub: " << render::hud::summary() << "\n";
 
     for (const auto& body : world_.bodies()) {
         if (body.kind == core::BodyKind::BlackHole) {

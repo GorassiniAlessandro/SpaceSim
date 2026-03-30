@@ -5,10 +5,14 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <iomanip>
 #include <iostream>
+#include <limits>
+#include <sstream>
 
 #include <GLFW/glfw3.h>
 
+#include "spacesim/render/HudState.hpp"
 #include "spacesim/render/TerminalRenderCommon.hpp"
 #include "spacesim/render/WindowCommandBridge.hpp"
 
@@ -38,6 +42,7 @@ struct Renderer2DOpenGL::Impl {
     bool initFailed = false;
     bool closeCommandSent = false;
     std::array<unsigned char, GLFW_KEY_LAST + 1> keyDown{};
+    unsigned int hudFrameCounter = 0;
     double panX = 0.0;
     double panY = 0.0;
     double zoom = 1.0;
@@ -117,6 +122,13 @@ void Renderer2DOpenGL::render(const core::World& world) {
     queueKey(GLFW_KEY_H, "h");
     queueKey(GLFW_KEY_ESCAPE, "q");
     queueKey(GLFW_KEY_Q, "q");
+    
+    // Scorciatoie HUD: Numpad 1-4 per toggle pannelli, Tab per on/off
+    queueKey(GLFW_KEY_KP_1, "hub toggle overview");
+    queueKey(GLFW_KEY_KP_2, "hub toggle kinematics");
+    queueKey(GLFW_KEY_KP_3, "hub toggle distance");
+    queueKey(GLFW_KEY_KP_4, "hub toggle energy");
+    queueKey(GLFW_KEY_TAB, "hub toggle-all");
 
     if (glfwGetKey(impl_->window, GLFW_KEY_LEFT) == GLFW_PRESS) {
         impl_->panX -= 0.02;
@@ -162,8 +174,60 @@ void Renderer2DOpenGL::render(const core::World& world) {
 
     const auto& bodies = world.bodies();
     if (bodies.empty()) {
+        glfwSetWindowTitle(impl_->window, "SpaceSim OpenGL 2D | N:0");
         glfwSwapBuffers(impl_->window);
         return;
+    }
+
+    // HUD live: metriche essenziali aggiornate periodicamente nel titolo finestra.
+    if ((impl_->hudFrameCounter++ % 10U) == 0U) {
+        const bool hubEnabled = hud::isEnabled();
+
+        double totalKinetic = 0.0;
+        double sumSpeed = 0.0;
+        double maxSpeedValue = 0.0;
+        double minDistance = std::numeric_limits<double>::infinity();
+
+        for (const auto& body : bodies) {
+            const double speed = body.velocity.length();
+            sumSpeed += speed;
+            maxSpeedValue = std::max(maxSpeedValue, speed);
+            totalKinetic += 0.5 * body.mass * speed * speed;
+        }
+
+        for (std::size_t i = 0; i < bodies.size(); ++i) {
+            for (std::size_t j = i + 1; j < bodies.size(); ++j) {
+                const core::Vec3 delta = bodies[j].position - bodies[i].position;
+                minDistance = std::min(minDistance, delta.length());
+            }
+        }
+        if (!std::isfinite(minDistance)) {
+            minDistance = 0.0;
+        }
+
+        const double avgSpeed = sumSpeed / static_cast<double>(bodies.size());
+
+        std::ostringstream hudTitle;
+        hudTitle << "SpaceSim OpenGL 2D"
+                 << " | HUB:" << (hubEnabled ? "on" : "off");
+
+        if (hubEnabled) {
+            if (hud::isPanelEnabled(hud::Panel::Overview)) {
+                hudTitle << " | N:" << bodies.size();
+            }
+            if (hud::isPanelEnabled(hud::Panel::Kinematics)) {
+                hudTitle << " | v_avg:" << std::fixed << std::setprecision(2) << (avgSpeed / 1000.0) << " km/s"
+                         << " | v_max:" << std::fixed << std::setprecision(2) << (maxSpeedValue / 1000.0) << " km/s";
+            }
+            if (hud::isPanelEnabled(hud::Panel::Distance)) {
+                hudTitle << " | d_min:" << std::fixed << std::setprecision(3) << (minDistance / 1.0e9) << " Gm";
+            }
+            if (hud::isPanelEnabled(hud::Panel::Energy)) {
+                hudTitle << " | Ek:" << std::scientific << std::setprecision(3) << totalKinetic << " J";
+            }
+        }
+
+        glfwSetWindowTitle(impl_->window, hudTitle.str().c_str());
     }
 
     double centerX = 0.0;
