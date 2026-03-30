@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <memory>
+#include <string>
 
 #include "spacesim/core/PhysicsEngine.hpp"
 #include "spacesim/core/SimulationConfig.hpp"
@@ -21,11 +23,13 @@ public:
 
 private:
     void loadInitialScenario();
+    bool loadScenarioByName(const std::string& scenarioName);
     void seedFallbackBodies();
     void processInput();
     void switchMode(RenderMode mode);
     void printCommandBoard() const;
     void printStatus() const;
+    void printMetrics() const;
 
     core::SimulationConfig config_;
     core::World world_;
@@ -36,6 +40,9 @@ private:
     bool paused_;
     bool stepRequested_;
     double timeScale_;
+    std::string currentScenario_;
+    std::size_t totalAbsorbedBodies_;
+    double totalAbsorbedMass_;
 };
 
 } // namespace spacesim::app

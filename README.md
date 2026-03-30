@@ -63,6 +63,8 @@ Responsabilita:
 ### 4) Dati/scenari
 
 - [objects/scenarios/solar_blackhole_demo.txt](objects/scenarios/solar_blackhole_demo.txt): scenario demo iniziale.
+- [objects/scenarios/binary_system.txt](objects/scenarios/binary_system.txt): sistema binario con pianeta esterno.
+- [objects/scenarios/asteroid_field.txt](objects/scenarios/asteroid_field.txt): sole + buco nero + campo di asteroidi.
 
 Formato scenario:
 
@@ -103,6 +105,8 @@ Durante `make run` puoi controllare la simulazione con questi comandi:
 - `+`: raddoppia la velocita simulazione
 - `-`: dimezza la velocita simulazione
 - `st`: stampa stato corrente (renderer, pausa, timeScale, dt, numero corpi)
+- `m` oppure `metrics`: stampa energia cinetica/potenziale/totale e momento totale
 - `r`: ricarica lo scenario da file
+- `load <nome>`: carica `objects/scenarios/<nome>.txt` (esempio: `load binary_system`)
 - `h`: mostra la guida comandi
 - `q`: termina il programma

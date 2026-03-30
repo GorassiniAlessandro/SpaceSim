@@ -1,0 +1,4 @@
+# name kind mass px py pz vx vy vz static eventHorizonRadius
+StarA star 1.8e30 -8.0e10 0 0 0 -12000 0 false 0
+StarB star 1.5e30 8.0e10 0 0 0 12000 0 false 0
+PlanetX planet 6.0e24 0 2.5e11 0 -22000 0 0 false 0

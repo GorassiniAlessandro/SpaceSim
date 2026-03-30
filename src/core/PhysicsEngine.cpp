@@ -2,16 +2,17 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <vector>
 
 namespace spacesim::core {
 
 PhysicsEngine::PhysicsEngine(SimulationConfig config) : config_(config) {}
 
-void PhysicsEngine::step(World& world, double dt) const {
+StepReport PhysicsEngine::step(World& world, double dt) const {
     auto& bodies = world.bodies();
     if (bodies.empty()) {
-        return;
+        return {};
     }
 
     const auto accelerationsStart = computeAccelerations(bodies);
@@ -35,7 +36,7 @@ void PhysicsEngine::step(World& world, double dt) const {
         bodies[i].velocity += (accelerationsStart[i] + accelerationsEnd[i]) * (0.5 * dt);
     }
 
-    applyBlackHoleAbsorption(world);
+    return applyBlackHoleAbsorption(world);
 }
 
 std::vector<Vec3> PhysicsEngine::computeAccelerations(const std::vector<Body>& bodies) const {
@@ -67,13 +68,24 @@ std::vector<Vec3> PhysicsEngine::computeAccelerations(const std::vector<Body>& b
     return accelerations;
 }
 
-void PhysicsEngine::applyBlackHoleAbsorption(World& world) const {
+StepReport PhysicsEngine::applyBlackHoleAbsorption(World& world) const {
     auto& bodies = world.bodies();
+    StepReport report;
+
     if (bodies.size() < 2) {
-        return;
+        return report;
     }
 
+    struct PendingAbsorption {
+        std::size_t absorberIndex;
+        std::size_t absorbedIndex;
+        double absorbedMass;
+        std::string absorberName;
+        std::string absorbedName;
+    };
+
     std::vector<size_t> absorbedIndexes;
+    std::vector<PendingAbsorption> pendingAbsorptions;
 
     for (size_t i = 0; i < bodies.size(); ++i) {
         if (bodies[i].kind != BodyKind::BlackHole || bodies[i].eventHorizonRadius <= 0.0) {
@@ -87,6 +99,8 @@ void PhysicsEngine::applyBlackHoleAbsorption(World& world) const {
 
             const Vec3 delta = bodies[j].position - bodies[i].position;
             if (delta.length() <= bodies[i].eventHorizonRadius) {
+                pendingAbsorptions.push_back(
+                    {i, j, bodies[j].mass, bodies[i].name, bodies[j].name});
                 bodies[i].mass += bodies[j].mass;
                 absorbedIndexes.push_back(j);
             }
@@ -94,15 +108,25 @@ void PhysicsEngine::applyBlackHoleAbsorption(World& world) const {
     }
 
     if (absorbedIndexes.empty()) {
-        return;
+        return report;
     }
 
     std::sort(absorbedIndexes.begin(), absorbedIndexes.end());
     absorbedIndexes.erase(std::unique(absorbedIndexes.begin(), absorbedIndexes.end()), absorbedIndexes.end());
 
+    report.absorptionEvents.reserve(pendingAbsorptions.size());
+    for (const auto& absorption : pendingAbsorptions) {
+        report.absorptionEvents.push_back(
+            {absorption.absorberName, absorption.absorbedName, absorption.absorbedMass});
+        report.absorbedMass += absorption.absorbedMass;
+    }
+    report.absorbedBodies = report.absorptionEvents.size();
+
     for (auto it = absorbedIndexes.rbegin(); it != absorbedIndexes.rend(); ++it) {
         bodies.erase(bodies.begin() + static_cast<std::vector<Body>::difference_type>(*it));
     }
+
+    return report;
 }
 
 } // namespace spacesim::core

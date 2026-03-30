@@ -1,7 +1,10 @@
 #include "spacesim/app/Application.hpp"
 
+#include <cmath>
+#include <iomanip>
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 
 #include "spacesim/core/ScenarioLoader.hpp"
@@ -10,6 +13,20 @@
 
 namespace spacesim::app {
 
+namespace {
+
+std::string trim(const std::string& value) {
+    const auto first = value.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) {
+        return "";
+    }
+
+    const auto last = value.find_last_not_of(" \t\r\n");
+    return value.substr(first, last - first + 1);
+}
+
+} // namespace
+
 Application::Application()
         : physics_(config_),
             renderer_(std::make_unique<render::Renderer2D>()),
@@ -17,7 +34,10 @@ Application::Application()
       running_(true),
       paused_(true),
       stepRequested_(false),
-      timeScale_(1.0) {
+      timeScale_(1.0),
+      currentScenario_("solar_blackhole_demo"),
+      totalAbsorbedBodies_(0),
+      totalAbsorbedMass_(0.0) {
         loadInitialScenario();
 }
 
@@ -34,7 +54,19 @@ void Application::run() {
         const bool shouldStep = (!paused_) || stepRequested_;
         if (shouldStep) {
             const double dt = config_.fixedTimeStepSeconds * timeScale_;
-            physics_.step(world_, dt);
+            const auto stepReport = physics_.step(world_, dt);
+
+            if (stepReport.absorbedBodies > 0) {
+                totalAbsorbedBodies_ += stepReport.absorbedBodies;
+                totalAbsorbedMass_ += stepReport.absorbedMass;
+
+                for (const auto& event : stepReport.absorptionEvents) {
+                    std::cout << "[ABSORB] " << event.absorberName
+                              << " ha assorbito " << event.absorbedName
+                              << " (massa=" << event.absorbedMass << ")\n";
+                }
+            }
+
             renderer_->render(world_);
         }
 
@@ -45,9 +77,7 @@ void Application::run() {
 }
 
 void Application::loadInitialScenario() {
-    const core::ScenarioLoader loader;
-    if (loader.loadFromFile("objects/scenarios/solar_blackhole_demo.txt", world_)) {
-        std::cout << "Scenario caricato da file.\n";
+    if (loadScenarioByName(currentScenario_)) {
         return;
     }
 
@@ -55,8 +85,34 @@ void Application::loadInitialScenario() {
     seedFallbackBodies();
 }
 
+bool Application::loadScenarioByName(const std::string& scenarioName) {
+    std::string normalizedName = trim(scenarioName);
+    if (normalizedName.empty()) {
+        return false;
+    }
+
+    if (normalizedName.size() < 4 || normalizedName.substr(normalizedName.size() - 4) != ".txt") {
+        normalizedName += ".txt";
+    }
+
+    const std::string fullPath = "objects/scenarios/" + normalizedName;
+    const core::ScenarioLoader loader;
+
+    if (!loader.loadFromFile(fullPath, world_)) {
+        return false;
+    }
+
+    currentScenario_ = normalizedName.substr(0, normalizedName.size() - 4);
+    totalAbsorbedBodies_ = 0;
+    totalAbsorbedMass_ = 0.0;
+    std::cout << "Scenario caricato da file: " << fullPath << "\n";
+    return true;
+}
+
 void Application::seedFallbackBodies() {
     world_.bodies().clear();
+    totalAbsorbedBodies_ = 0;
+    totalAbsorbedMass_ = 0.0;
 
     core::Body sun;
     sun.name = "Sun";
@@ -119,6 +175,16 @@ void Application::processInput() {
         return;
     }
 
+    if (input.rfind("load ", 0) == 0) {
+        const std::string requestedScenario = trim(input.substr(5));
+        if (loadScenarioByName(requestedScenario)) {
+            std::cout << "Scenario cambiato con successo.\n";
+        } else {
+            std::cout << "Scenario non trovato o invalido: " << requestedScenario << "\n";
+        }
+        return;
+    }
+
     if (input == "+") {
         timeScale_ *= 2.0;
         if (timeScale_ > 1024.0) {
@@ -139,6 +205,11 @@ void Application::processInput() {
 
     if (input == "st") {
         printStatus();
+        return;
+    }
+
+    if (input == "m" || input == "metrics") {
+        printMetrics();
         return;
     }
 
@@ -179,7 +250,9 @@ void Application::printCommandBoard() const {
               << "  +            -> raddoppia velocita simulazione\n"
               << "  -            -> dimezza velocita simulazione\n"
               << "  st           -> mostra stato corrente\n"
+              << "  m            -> mostra metriche fisiche (energia e momento)\n"
               << "  r            -> ricarica lo scenario dal file\n"
+              << "  load <nome>  -> carica uno scenario da objects/scenarios/<nome>.txt\n"
               << "  h            -> mostra questa guida\n"
               << "  q            -> esci\n";
 }
@@ -190,7 +263,52 @@ void Application::printStatus() const {
               << "  paused: " << (paused_ ? "true" : "false") << "\n"
               << "  timeScale: x" << timeScale_ << "\n"
               << "  dt base: " << config_.fixedTimeStepSeconds << " s\n"
-              << "  corpi attivi: " << world_.bodies().size() << "\n";
+              << "  scenario: " << currentScenario_ << "\n"
+              << "  corpi attivi: " << world_.bodies().size() << "\n"
+              << "  assorbimenti totali: " << totalAbsorbedBodies_ << "\n"
+              << "  massa assorbita totale: " << totalAbsorbedMass_ << "\n";
+
+    for (const auto& body : world_.bodies()) {
+        if (body.kind == core::BodyKind::BlackHole) {
+            std::cout << "  black hole: " << body.name << " massa=" << body.mass
+                      << " eventHorizon=" << body.eventHorizonRadius << "\n";
+        }
+    }
+}
+
+void Application::printMetrics() const {
+    const auto& bodies = world_.bodies();
+    double kineticEnergy = 0.0;
+    double potentialEnergy = 0.0;
+    core::Vec3 totalMomentum{};
+
+    for (const auto& body : bodies) {
+        const double speedSq = body.velocity.lengthSquared();
+        kineticEnergy += 0.5 * body.mass * speedSq;
+        totalMomentum += body.velocity * body.mass;
+    }
+
+    for (std::size_t i = 0; i < bodies.size(); ++i) {
+        for (std::size_t j = i + 1; j < bodies.size(); ++j) {
+            const core::Vec3 delta = bodies[j].position - bodies[i].position;
+            const double distance = std::sqrt(delta.lengthSquared() + config_.softeningLengthSquared);
+            if (distance <= 0.0) {
+                continue;
+            }
+
+            potentialEnergy -= (config_.gravitationalConstant * bodies[i].mass * bodies[j].mass) / distance;
+        }
+    }
+
+    const double totalEnergy = kineticEnergy + potentialEnergy;
+
+    std::cout << std::setprecision(10)
+              << "Metriche fisiche:\n"
+              << "  energia cinetica: " << kineticEnergy << "\n"
+              << "  energia potenziale: " << potentialEnergy << "\n"
+              << "  energia totale: " << totalEnergy << "\n"
+              << "  momento totale: (" << totalMomentum.x << ", "
+              << totalMomentum.y << ", " << totalMomentum.z << ")\n";
 }
 
 } // namespace spacesim::app

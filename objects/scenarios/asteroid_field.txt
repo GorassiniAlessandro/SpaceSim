@@ -1,0 +1,8 @@
+# name kind mass px py pz vx vy vz static eventHorizonRadius
+Sun star 1.989e30 0 0 0 0 0 0 true 0
+BlackHole blackhole 6.0e30 -2.8e11 0 0 0 0 0 true 6.0e9
+Ast1 asteroid 1.2e17 1.2e11 0 0 0 32000 0 false 0
+Ast2 asteroid 9.8e16 1.35e11 1.0e10 0 -2500 31500 0 false 0
+Ast3 asteroid 1.6e17 1.5e11 -8.0e9 0 1800 30500 0 false 0
+Ast4 asteroid 7.0e16 1.7e11 1.8e10 0 -2100 29200 0 false 0
+Ast5 asteroid 1.1e17 1.9e11 -1.6e10 0 1700 28100 0 false 0
