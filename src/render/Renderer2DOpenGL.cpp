@@ -222,34 +222,74 @@ void Renderer2DOpenGL::render(const core::World& world) {
     }
     glEnd();
 
-    glPointSize(6.0f);
-    glBegin(GL_POINTS);
+    // Renderizza corpi come cerchi 2D con geometria realistica
     for (const auto& body : bodies) {
         const double x = ((body.position.x - centerX) * inv) + impl_->panX;
         const double y = ((body.position.y - centerY) * inv) + impl_->panY;
 
+        // Raggio di visualizzazione: proporzionale alle posizioni per mantenere rapporti costanti
+        // Moltiplicatore aumentato per migliore visibilità
+        float radiusDisplay = static_cast<float>(std::max(0.015 * maxRange, body.radius * 1.5) * inv);
+
+        // Colore per tipo di corpo
+        float r = 0.9f, g = 0.9f, b = 0.9f;
         switch (body.kind) {
         case core::BodyKind::Star:
-            glColor3f(1.0f, 0.95f, 0.45f);
+            r = 1.0f;
+            g = 0.9f;
+            b = 0.3f;
             break;
         case core::BodyKind::Planet:
-            glColor3f(0.4f, 0.7f, 1.0f);
+            r = 0.3f;
+            g = 0.6f;
+            b = 1.0f;
             break;
         case core::BodyKind::Asteroid:
-            glColor3f(0.7f, 0.7f, 0.7f);
+            r = 0.65f;
+            g = 0.6f;
+            b = 0.5f;
             break;
         case core::BodyKind::BlackHole:
-            glColor3f(0.8f, 0.2f, 0.95f);
+            r = 0.8f;
+            g = 0.2f;
+            b = 0.95f;
             break;
         case core::BodyKind::Generic:
         default:
-            glColor3f(0.9f, 0.9f, 0.9f);
+            r = 0.9f;
+            g = 0.9f;
+            b = 0.9f;
             break;
         }
 
+        glColor3f(r, g, b);
+
+        // Disegna cerchio con GL_TRIANGLE_FAN
+        const int segments = (body.kind == core::BodyKind::Star) ? 32 : 16;
+        const float pi2 = 6.283185307f;
+
+        glBegin(GL_TRIANGLE_FAN);
         glVertex2f(static_cast<float>(x), static_cast<float>(y));
+        for (int i = 0; i <= segments; ++i) {
+            const float angle = (static_cast<float>(i) / static_cast<float>(segments)) * pi2;
+            const float cx = static_cast<float>(x) + radiusDisplay * std::cos(angle);
+            const float cy = static_cast<float>(y) + radiusDisplay * std::sin(angle);
+            glVertex2f(cx, cy);
+        }
+        glEnd();
+
+        // Bordo del cerchio per maggior definizione
+        glColor3f(r * 1.2f, g * 1.2f, b * 1.2f);
+        glLineWidth(1.5f);
+        glBegin(GL_LINE_LOOP);
+        for (int i = 0; i < segments; ++i) {
+            const float angle = (static_cast<float>(i) / static_cast<float>(segments)) * pi2;
+            const float cx = static_cast<float>(x) + radiusDisplay * std::cos(angle);
+            const float cy = static_cast<float>(y) + radiusDisplay * std::sin(angle);
+            glVertex2f(cx, cy);
+        }
+        glEnd();
     }
-    glEnd();
 
     glfwSwapBuffers(impl_->window);
 }

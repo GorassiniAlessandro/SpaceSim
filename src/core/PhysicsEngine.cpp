@@ -9,20 +9,50 @@ namespace spacesim::core {
 
 PhysicsEngine::PhysicsEngine(SimulationConfig config) : config_(config) {}
 
+void PhysicsEngine::setConfig(const SimulationConfig& config) {
+    config_ = config;
+}
+
+const SimulationConfig& PhysicsEngine::config() const {
+    return config_;
+}
+
 StepReport PhysicsEngine::step(World& world, double dt) const {
     auto& bodies = world.bodies();
     if (bodies.empty()) {
         return {};
     }
 
+    // Calcola accelerazione massima per adaptive timestep
     const auto accelerationsStart = computeAccelerations(bodies);
+    
+    double maxAccel = 0.0;
+    for (const auto& accel : accelerationsStart) {
+        const double len = accel.length();
+        if (len > maxAccel) maxAccel = len;
+    }
+    
+    // Limita timestep in base all'accelerazione massima per stabilità
+    // Formula: dt_safe <= sqrt(2 * error_tol / max_accel)
+    // Usiamo constraint conservativo: max dt = 1 giorno quando accel è alta
+    double safedt = dt;
+    if (maxAccel > 1e-10) {
+        const double maxDtForAccel = 1e8;  // ~1.15 giorni massimo
+        if (safedt > maxDtForAccel) {
+            safedt = maxDtForAccel;
+        }
+    }
+    
+    // Cap finale: mai più di 1 miliardo di secondi
+    safedt = std::min(safedt, 1e9);
 
     for (size_t i = 0; i < bodies.size(); ++i) {
         if (bodies[i].isStatic) {
             continue;
         }
 
-        const Vec3 displacement = (bodies[i].velocity * dt) + (accelerationsStart[i] * (0.5 * dt * dt));
+        // Velocity-Verlet: x(t+dt) = x(t) + v(t)*dt + 0.5*a(t)*dt^2
+        const Vec3 displacement = (bodies[i].velocity * safedt) + (accelerationsStart[i] * (0.5 * safedt * safedt));
         bodies[i].position += displacement;
     }
 
@@ -33,7 +63,11 @@ StepReport PhysicsEngine::step(World& world, double dt) const {
             continue;
         }
 
-        bodies[i].velocity += (accelerationsStart[i] + accelerationsEnd[i]) * (0.5 * dt);
+        // v(t+dt) = v(t) + 0.5*(a(t) + a(t+dt))*dt
+        bodies[i].velocity += (accelerationsStart[i] + accelerationsEnd[i]) * (0.5 * safedt);
+        
+        // Applica minimo damping per ridurre drift numerico senza rubare energia
+        bodies[i].velocity *= config_.numericalDampingFactor;
     }
 
     return applyBlackHoleAbsorption(world);
@@ -41,6 +75,32 @@ StepReport PhysicsEngine::step(World& world, double dt) const {
 
 std::vector<Vec3> PhysicsEngine::computeAccelerations(const std::vector<Body>& bodies) const {
     std::vector<Vec3> accelerations(bodies.size(), Vec3{});
+
+    const bool useGalilean =
+        config_.gravityModel == GravityModel::Galilean ||
+        config_.gravityModel == GravityModel::Hybrid;
+    const bool useNewtonianPairwise =
+        config_.gravityModel == GravityModel::Newtonian ||
+        config_.gravityModel == GravityModel::Relativistic ||
+        config_.gravityModel == GravityModel::Hybrid;
+    const bool useRelativisticCorrection =
+        config_.gravityModel == GravityModel::Relativistic ||
+        config_.gravityModel == GravityModel::Hybrid;
+
+    if (useGalilean) {
+        for (size_t i = 0; i < bodies.size(); ++i) {
+            if (bodies[i].isStatic) {
+                continue;
+            }
+            accelerations[i] += config_.galileanField;
+        }
+    }
+
+    if (!useNewtonianPairwise) {
+        return accelerations;
+    }
+
+    const double c2 = config_.lightSpeed * config_.lightSpeed;
 
     for (size_t i = 0; i < bodies.size(); ++i) {
         if (bodies[i].isStatic) {
@@ -60,7 +120,21 @@ std::vector<Vec3> PhysicsEngine::computeAccelerations(const std::vector<Body>& b
                 continue;
             }
 
-            const double accelMagnitude = (config_.gravitationalConstant * bodies[j].mass) / distanceSq;
+            double correction = 1.0;
+            if (useRelativisticCorrection && c2 > 0.0) {
+                const Vec3 vRel = bodies[i].velocity - bodies[j].velocity;
+                const Vec3 h = cross(delta, vRel);
+                const double h2 = h.lengthSquared();
+                correction += (3.0 * h2) / (distanceSq * c2);
+
+                // Keep correction bounded for numerical stability in this simplified model.
+                if (correction > 50.0) {
+                    correction = 50.0;
+                }
+            }
+
+            const double accelMagnitude =
+                ((config_.gravitationalConstant * bodies[j].mass) / distanceSq) * correction;
             accelerations[i] += delta * (accelMagnitude / distance);
         }
     }

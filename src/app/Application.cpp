@@ -55,6 +55,20 @@ std::unique_ptr<render::IRenderer> makeRenderer(RenderBackend backend, RenderMod
     return std::make_unique<render::Renderer3D>();
 }
 
+const char* gravityModelName(core::GravityModel model) {
+    switch (model) {
+    case core::GravityModel::Galilean:
+        return "Galilean";
+    case core::GravityModel::Relativistic:
+        return "Relativistic";
+    case core::GravityModel::Hybrid:
+        return "Hybrid";
+    case core::GravityModel::Newtonian:
+    default:
+        return "Newtonian";
+    }
+}
+
 bool hasStdinInputAvailable() {
 #if defined(__linux__) || defined(__APPLE__)
     fd_set readfds;
@@ -276,8 +290,8 @@ void Application::executeCommand(const std::string& rawInput) {
 
     if (input == "+") {
         timeScale_ *= 2.0;
-        if (timeScale_ > 1024.0) {
-            timeScale_ = 1024.0;
+        if (timeScale_ > 256.0) {  // Limite massimo per stabilità
+            timeScale_ = 256.0;
         }
         std::cout << "Time scale impostata a x" << timeScale_ << "\n";
         return;
@@ -302,6 +316,26 @@ void Application::executeCommand(const std::string& rawInput) {
         return;
     }
 
+    if (input.rfind("phys ", 0) == 0) {
+        const std::string mode = trim(input.substr(5));
+        if (mode == "newton" || mode == "newtonian") {
+            config_.gravityModel = core::GravityModel::Newtonian;
+        } else if (mode == "galileo" || mode == "galilean") {
+            config_.gravityModel = core::GravityModel::Galilean;
+        } else if (mode == "rel" || mode == "relativity" || mode == "relativistic") {
+            config_.gravityModel = core::GravityModel::Relativistic;
+        } else if (mode == "hybrid") {
+            config_.gravityModel = core::GravityModel::Hybrid;
+        } else {
+            std::cout << "Modello fisico non riconosciuto. Usa: newton | galileo | rel | hybrid\n";
+            return;
+        }
+
+        physics_.setConfig(config_);
+        std::cout << "Modello fisico impostato su " << gravityModelName(config_.gravityModel) << "\n";
+        return;
+    }
+
     if (input == "2") {
         switchMode(RenderMode::TwoD);
         return;
@@ -317,7 +351,7 @@ void Application::executeCommand(const std::string& rawInput) {
         return;
     }
 
-    if (input == "gfx opengl") {
+    if (input == "gfx opengl" || input == "w") {
         switchBackend(RenderBackend::OpenGL);
         return;
     }
@@ -374,10 +408,12 @@ void Application::printCommandBoard() const {
               << "  -            -> dimezza velocita simulazione\n"
               << "  st           -> mostra stato corrente\n"
               << "  m            -> mostra metriche fisiche (energia e momento)\n"
+              << "  phys <mode>  -> cambia modello fisico: newton | galileo | rel | hybrid\n"
               << "  r            -> ricarica lo scenario dal file\n"
               << "  load <nome>  -> carica uno scenario da objects/scenarios/<nome>.txt\n"
               << "  gfx ascii    -> usa renderer ASCII in terminale\n"
               << "  gfx opengl   -> usa renderer OpenGL in finestra\n"
+              << "  w            -> scorciatoia per entrare in finestra OpenGL\n"
               << "  h            -> mostra questa guida\n"
               << "  q            -> esci\n"
               << "Hotkeys visuale in finestra OpenGL:\n"
@@ -390,6 +426,7 @@ void Application::printStatus() const {
               << "  renderer: " << renderer_->name() << "\n"
               << "  paused: " << (paused_ ? "true" : "false") << "\n"
               << "  backend: " << (backend_ == RenderBackend::Ascii ? "ASCII" : "OpenGL") << "\n"
+              << "  gravityModel: " << gravityModelName(config_.gravityModel) << "\n"
               << "  timeScale: x" << timeScale_ << "\n"
               << "  dt base: " << config_.fixedTimeStepSeconds << " s\n"
               << "  scenario: " << currentScenario_ << "\n"

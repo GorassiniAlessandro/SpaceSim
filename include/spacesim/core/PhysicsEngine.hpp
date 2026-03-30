@@ -25,6 +25,8 @@ class PhysicsEngine {
 public:
     explicit PhysicsEngine(SimulationConfig config = {});
     StepReport step(World& world, double dt) const;
+    void setConfig(const SimulationConfig& config);
+    [[nodiscard]] const SimulationConfig& config() const;
 
 private:
     [[nodiscard]] std::vector<Vec3> computeAccelerations(const std::vector<Body>& bodies) const;

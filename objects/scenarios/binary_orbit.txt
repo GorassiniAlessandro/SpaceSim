@@ -1,0 +1,3 @@
+# name kind mass px py pz vx vy vz static eventHorizonRadius
+Primary star 5e30 0 0 0 0 0 0 false 0
+SecondaryBody planet 1e24 1e11 0 0 0 57900 0 false 0

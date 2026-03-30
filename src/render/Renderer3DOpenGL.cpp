@@ -30,6 +30,94 @@ GlfwRuntime& runtime() {
     return instance;
 }
 
+// Disegna una sfera usando coordinate sferiche corrette (latitude/longitude)
+void drawSphere(float radius, int lats = 16, int lons = 16) {
+    const float pi = 3.14159265359f;
+
+    for (int i = 0; i < lats; ++i) {
+        const float phi1 = (pi * static_cast<float>(i)) / static_cast<float>(lats);
+        const float phi2 = (pi * static_cast<float>(i + 1)) / static_cast<float>(lats);
+
+        const float sinPhi1 = std::sin(phi1);
+        const float cosPhi1 = std::cos(phi1);
+        const float sinPhi2 = std::sin(phi2);
+        const float cosPhi2 = std::cos(phi2);
+
+        glBegin(GL_QUAD_STRIP);
+        for (int j = 0; j <= lons; ++j) {
+            const float theta = (2.0f * pi * static_cast<float>(j)) / static_cast<float>(lons);
+            const float sinTheta = std::sin(theta);
+            const float cosTheta = std::cos(theta);
+
+            // Prima fascia: phi1
+            glVertex3f(
+                radius * sinPhi1 * cosTheta,
+                radius * cosPhi1,
+                radius * sinPhi1 * sinTheta
+            );
+
+            // Seconda fascia: phi2
+            glVertex3f(
+                radius * sinPhi2 * cosTheta,
+                radius * cosPhi2,
+                radius * sinPhi2 * sinTheta
+            );
+        }
+        glEnd();
+    }
+}
+
+// Disegna un disco (per accretion disk di buchi neri)
+void drawDisk(float innerRadius, float outerRadius, int segments = 32) {
+    const float pi2 = 6.283185307f;
+    glBegin(GL_TRIANGLE_STRIP);
+    for (int i = 0; i <= segments; ++i) {
+        const float angle = (static_cast<float>(i) / static_cast<float>(segments)) * pi2;
+        const float cosA = std::cos(angle);
+        const float sinA = std::sin(angle);
+
+        glVertex3f(innerRadius * cosA, 0.0f, innerRadius * sinA);
+        glVertex3f(outerRadius * cosA, 0.0f, outerRadius * sinA);
+    }
+    glEnd();
+}
+
+// Disegna una freccia dal punto start al punto end
+void drawArrow(float startX, float startY, float startZ, float endX, float endY, float endZ, float arrowSize = 0.1f) {
+    // Linea principale
+    glBegin(GL_LINES);
+    glVertex3f(startX, startY, startZ);
+    glVertex3f(endX, endY, endZ);
+    glEnd();
+    
+    // Punta della freccia (cone semplice)
+    glPushMatrix();
+    glTranslatef(endX, endY, endZ);
+    
+    // Direzione della freccia
+    float dx = endX - startX;
+    float dy = endY - startY;
+    float dz = endZ - startZ;
+    float len = std::sqrt(dx*dx + dy*dy + dz*dz);
+    
+    if (len > 0.001f) {
+        dx /= len;
+        dy /= len;
+        dz /= len;
+        
+        // Piccolo cono come punta
+        glBegin(GL_TRIANGLES);
+        // Base del cono (tre vertici)
+        const float coneBase = arrowSize * 0.15f;
+        glVertex3f(0, 0, 0);
+        glVertex3f(coneBase * dy, coneBase * dz, -coneBase * dx);
+        glVertex3f(-coneBase * dy, -coneBase * dz, coneBase * dx);
+        glEnd();
+    }
+    
+    glPopMatrix();
+}
+
 } // namespace
 
 struct Renderer3DOpenGL::Impl {
@@ -284,35 +372,192 @@ void Renderer3DOpenGL::render(const core::World& world) {
     glVertex3f(0.0f, 0.0f, axisExtent);
     glEnd();
 
-    glPointSize(6.0f);
-    glBegin(GL_POINTS);
+    // Renderizza corpi come sfere 3D con geometria realistica
     for (const auto& body : bodies) {
         const float x = static_cast<float>((body.position.x - centerX) * inv);
         const float y = static_cast<float>((body.position.y - centerY) * inv);
         const float z = static_cast<float>((body.position.z - centerZ) * inv);
 
+        // Raggio della sfera: proporzionale alle posizioni per mantenere rapporti costanti
+        // Moltiplicatore aumentato per migliore visibilità
+        float radiusDisplay = static_cast<float>(std::max(0.015 * maxRadius, body.radius * 1.5) * inv);
+
+        glPushMatrix();
+        glTranslatef(x, y, z);
+
+        // Colori e geometrie per tipo di corpo
         switch (body.kind) {
-        case core::BodyKind::Star:
-            glColor3f(1.0f, 0.95f, 0.45f);
-            break;
-        case core::BodyKind::Planet:
-            glColor3f(0.4f, 0.7f, 1.0f);
-            break;
-        case core::BodyKind::Asteroid:
-            glColor3f(0.7f, 0.7f, 0.7f);
-            break;
-        case core::BodyKind::BlackHole:
-            glColor3f(0.8f, 0.2f, 0.95f);
-            break;
-        case core::BodyKind::Generic:
-        default:
-            glColor3f(0.9f, 0.9f, 0.9f);
+        case core::BodyKind::Star: {
+            // Stella: giallo-arancione brillante
+            glColor3f(1.0f, 0.9f, 0.3f);
+            drawSphere(radiusDisplay, 20, 20);
+            
+            // Alone attorno a stelle (raggio doppio, trasparente)
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+            glColor4f(1.0f, 0.6f, 0.0f, 0.2f);
+            drawSphere(radiusDisplay * 1.8f, 12, 12);
+            glDisable(GL_BLEND);
             break;
         }
+        case core::BodyKind::Planet: {
+            // Pianeta: azzurro con atmosfera
+            glColor3f(0.3f, 0.6f, 1.0f);
+            drawSphere(radiusDisplay, 20, 20);
+            
+            // Atmosfera come fascia sottile sulla superficie
+            glColor3f(0.5f, 0.8f, 1.0f);
+            drawSphere(radiusDisplay * 1.1f, 16, 16);
+            break;
+        }
+        case core::BodyKind::Asteroid: {
+            // Asteroide: grigio-marrone, leggermente irregolare
+            glColor3f(0.65f, 0.6f, 0.5f);
+            drawSphere(radiusDisplay, 12, 12);
+            
+            // Variazione cromatica per aspetto irregolare
+            glColor3f(0.75f, 0.65f, 0.55f);
+            drawSphere(radiusDisplay * 0.95f, 10, 10);
+            break;
+        }
+        case core::BodyKind::BlackHole: {
+            // Buco nero: sfera nera con disco di accrezione
+            glColor3f(0.1f, 0.05f, 0.1f);
+            drawSphere(radiusDisplay, 24, 24);
+            
+            // Disco di accrezione attorno al buco nero
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+            glDisable(GL_DEPTH_TEST);
+            
+            const float diskInner = radiusDisplay * 0.9f;
+            const float diskOuter = radiusDisplay * 3.5f;
+            glColor4f(1.0f, 0.4f, 0.1f, 0.4f);
+            drawDisk(diskInner, diskOuter, 32);
+            
+            glEnable(GL_DEPTH_TEST);
+            glDisable(GL_BLEND);
+            break;
+        }
+        case core::BodyKind::Generic:
+        default: {
+            // Corpo generico: bianco
+            glColor3f(0.9f, 0.9f, 0.9f);
+            drawSphere(radiusDisplay, 16, 16);
+            break;
+        }
+        }
 
-        glVertex3f(x, y, z);
+        glPopMatrix();
     }
-    glEnd();
+
+    // Renderizza vettori di velocità e traiettoria predetta
+    // Solo per i primi 2 corpi per chiarezza
+    int bodyCount = 0;
+    for (const auto& body : bodies) {
+        if (bodyCount >= 2 || body.isStatic) {
+            bodyCount++;
+            continue;
+        }
+
+        const float x = static_cast<float>((body.position.x - centerX) * inv);
+        const float y = static_cast<float>((body.position.y - centerY) * inv);
+        const float z = static_cast<float>((body.position.z - centerZ) * inv);
+
+        // Vettore di velocità (verde)
+        const float velScale = 1e-6f;  // Aumentato per visibilità
+        const float velX = x + static_cast<float>(body.velocity.x * velScale * inv);
+        const float velY = y + static_cast<float>(body.velocity.y * velScale * inv);
+        const float velZ = z + static_cast<float>(body.velocity.z * velScale * inv);
+        
+        glLineWidth(2.0f);
+        glColor3f(0.2f, 1.0f, 0.2f);
+        drawArrow(x, y, z, velX, velY, velZ, 0.05f);
+        glLineWidth(1.0f);
+
+        // Calcola accelerazione gravitazionale dovuta a tutti gli altri corpi
+        spacesim::core::Vec3 totalAccel{0, 0, 0};
+        const double G = 6.67430e-11;
+        const double c2 = 299792458.0 * 299792458.0;
+        
+        for (const auto& other : bodies) {
+            if (other.name == body.name) continue;
+            
+            const spacesim::core::Vec3 delta = other.position - body.position;
+            const double distanceSq = delta.lengthSquared() + 1e6;
+            const double distance = std::sqrt(distanceSq);
+            
+            if (distance > 0) {
+                double correction = 1.0;
+                const spacesim::core::Vec3 vRel = body.velocity - other.velocity;
+                const spacesim::core::Vec3 h = cross(delta, vRel);
+                const double h2 = h.lengthSquared();
+                if (c2 > 0.0) correction += (3.0 * h2) / (distanceSq * c2);
+                
+                const double accelMag = ((G * other.mass) / distanceSq) * correction;
+                totalAccel += delta * (static_cast<float>(accelMag / distance));
+            }
+        }
+        
+        // Vettore di accelerazione (rosso)
+        const float accelScale = 1e-10f;  // Aumentato per visibilità
+        const float accelX = x + static_cast<float>(totalAccel.x * accelScale * inv);
+        const float accelY = y + static_cast<float>(totalAccel.y * accelScale * inv);
+        const float accelZ = z + static_cast<float>(totalAccel.z * accelScale * inv);
+        
+        glLineWidth(2.0f);
+        glColor3f(1.0f, 0.2f, 0.2f);
+        drawArrow(x, y, z, accelX, accelY, accelZ, 0.05f);
+        glLineWidth(1.0f);
+
+        // Traiettoria predetta (simula i prossimi 100 passi)
+        spacesim::core::Vec3 pos = body.position;
+        spacesim::core::Vec3 vel = body.velocity;
+        const double dt = 0.5;
+        const int predictionSteps = 100;
+        
+        glColor3f(0.5f, 0.8f, 1.0f);
+        glLineWidth(1.5f);
+        glBegin(GL_LINE_STRIP);
+        
+        for (int step = 0; step < predictionSteps; ++step) {
+            // Calcola accelerazione per questa posizione
+            spacesim::core::Vec3 accel{0, 0, 0};
+            for (const auto& other : bodies) {
+                if (other.name == body.name) continue;
+                
+                const spacesim::core::Vec3 delta = other.position - pos;
+                const double distanceSq = delta.lengthSquared() + 1e6;
+                const double distance = std::sqrt(distanceSq);
+                
+                if (distance > 0) {
+                    double correction = 1.0;
+                    const spacesim::core::Vec3 vRel = vel - other.velocity;
+                    const spacesim::core::Vec3 h = cross(delta, vRel);
+                    const double h2 = h.lengthSquared();
+                    if (c2 > 0.0) correction += (3.0 * h2) / (distanceSq * c2);
+                    
+                    const double accelMag = ((G * other.mass) / distanceSq) * correction;
+                    accel += delta * (accelMag / distance);
+                }
+            }
+            
+            // Velocity-Verlet step
+            pos += vel * dt + accel * (0.5 * dt * dt);
+            vel += accel * dt;
+            
+            // Disegna punto della traiettoria
+            const float px = static_cast<float>((pos.x - centerX) * inv);
+            const float py = static_cast<float>((pos.y - centerY) * inv);
+            const float pz = static_cast<float>((pos.z - centerZ) * inv);
+            glVertex3f(px, py, pz);
+        }
+        
+        glEnd();
+        glLineWidth(1.0f);
+
+        bodyCount++;
+    }
 
     glfwSwapBuffers(impl_->window);
 }

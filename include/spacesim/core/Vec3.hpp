@@ -59,4 +59,19 @@ inline Vec3 operator*(double scalar, Vec3 v) {
     return v;
 }
 
+inline Vec3 operator/(Vec3 v, double scalar) {
+    if (scalar != 0.0) {
+        v *= (1.0 / scalar);
+    }
+    return v;
+}
+
+inline Vec3 cross(const Vec3& a, const Vec3& b) {
+    return {
+        (a.y * b.z) - (a.z * b.y),
+        (a.z * b.x) - (a.x * b.z),
+        (a.x * b.y) - (a.y * b.x)
+    };
+}
+
 } // namespace spacesim::core
