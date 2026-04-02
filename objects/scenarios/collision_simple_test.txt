@@ -1,0 +1,5 @@
+# Ultra-Simple Collision Test
+# Two stars, very close, directly on collision path
+# name kind mass px py pz vx vy vz static eventHorizonRadius
+Star_Fixed star 5.0e29 0 0 0 0 0 0 true 0
+Star_Moving star 3.0e29 1e4 0 0 -1000 0 0 false 0

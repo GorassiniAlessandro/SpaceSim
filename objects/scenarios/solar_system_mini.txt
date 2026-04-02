@@ -1,0 +1,8 @@
+# Four-Body Planetary System
+# Central Sun (STATIC) + 3 orbiting planets at different orbital radii
+# Velocities calculated from v = sqrt(G*M_sun/r) for circular orbits
+# name kind mass px py pz vx vy vz static eventHorizonRadius
+Sun star 1.989e30 0 0 0 0 0 0 true 0
+Planet_A planet 5.972e24 8e10 0 0 0 40700 0 false 0
+Planet_B planet 1.898e27 1.5e11 0 0 0 29750 0 false 0
+Planet_C planet 1.023e26 2.0e11 0 0 0 25760 0 false 0

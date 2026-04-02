@@ -58,8 +58,6 @@ std::unique_ptr<render::IRenderer> makeRenderer(RenderBackend backend, RenderMod
 
 const char* gravityModelName(core::GravityModel model) {
     switch (model) {
-    case core::GravityModel::Galilean:
-        return "Galilean";
     case core::GravityModel::Relativistic:
         return "Relativistic";
     case core::GravityModel::Hybrid:
@@ -119,7 +117,10 @@ Application::Application()
     commandPromptShown_(false),
       currentScenario_("solar_blackhole_demo"),
       totalAbsorbedBodies_(0),
-      totalAbsorbedMass_(0.0) {
+            totalAbsorbedMass_(0.0),
+            diagnosticsReferenceSet_(false),
+            diagnosticsReference_(),
+            lastDiagnostics_() {
         renderer_ = makeRenderer(backend_, mode_);
         loadInitialScenario();
 }
@@ -139,6 +140,12 @@ void Application::run() {
         if (shouldStep) {
             const double dt = config_.fixedTimeStepSeconds * timeScale_;
             const auto stepReport = physics_.step(world_, dt);
+            lastDiagnostics_ = stepReport.diagnostics;
+
+            if (!diagnosticsReferenceSet_ && world_.bodies().size() >= 2) {
+                diagnosticsReference_ = stepReport.diagnostics;
+                diagnosticsReferenceSet_ = true;
+            }
 
             if (stepReport.absorbedBodies > 0) {
                 totalAbsorbedBodies_ += stepReport.absorbedBodies;
@@ -149,6 +156,13 @@ void Application::run() {
                               << " ha assorbito " << event.absorbedName
                               << " (massa=" << event.absorbedMass << ")\n";
                 }
+            }
+
+            if (stepRequested_) {
+                std::cout << "[STEP] dt=" << stepReport.integratedDt
+                          << " substeps=" << stepReport.substepsUsed
+                          << " a_max=" << stepReport.diagnostics.maxAcceleration
+                          << " E=" << stepReport.diagnostics.totalEnergy << "\n";
             }
 
         }
@@ -206,6 +220,7 @@ bool Application::loadScenarioByName(const std::string& scenarioName) {
     currentScenario_ = normalizedName.substr(0, normalizedName.size() - 4);
     totalAbsorbedBodies_ = 0;
     totalAbsorbedMass_ = 0.0;
+    resetDiagnosticsReference();
     std::cout << "Scenario caricato da file: " << fullPath << "\n";
     return true;
 }
@@ -214,6 +229,7 @@ void Application::seedFallbackBodies() {
     world_.bodies().clear();
     totalAbsorbedBodies_ = 0;
     totalAbsorbedMass_ = 0.0;
+    resetDiagnosticsReference();
 
     core::Body sun;
     sun.name = "Sun";
@@ -242,6 +258,7 @@ void Application::seedFallbackBodies() {
     world_.addBody(sun);
     world_.addBody(earth);
     world_.addBody(blackHole);
+    resetDiagnosticsReference();
 }
 
 void Application::processInput() {
@@ -450,18 +467,17 @@ void Application::executeCommand(const std::string& rawInput) {
         const std::string mode = trim(input.substr(5));
         if (mode == "newton" || mode == "newtonian") {
             config_.gravityModel = core::GravityModel::Newtonian;
-        } else if (mode == "galileo" || mode == "galilean") {
-            config_.gravityModel = core::GravityModel::Galilean;
         } else if (mode == "rel" || mode == "relativity" || mode == "relativistic") {
             config_.gravityModel = core::GravityModel::Relativistic;
         } else if (mode == "hybrid") {
             config_.gravityModel = core::GravityModel::Hybrid;
         } else {
-            std::cout << "Modello fisico non riconosciuto. Usa: newton | galileo | rel | hybrid\n";
+            std::cout << "Modello fisico non riconosciuto. Usa: newton | rel | hybrid\n";
             return;
         }
 
         physics_.setConfig(config_);
+        resetDiagnosticsReference();
         std::cout << "Modello fisico impostato su " << gravityModelName(config_.gravityModel) << "\n";
         return;
     }
@@ -483,6 +499,28 @@ void Application::executeCommand(const std::string& rawInput) {
 
     if (input == "gfx opengl" || input == "w") {
         switchBackend(RenderBackend::OpenGL);
+        return;
+    }
+
+    if (input == "collision on") {
+        config_.enableCollisionMerging = true;
+        physics_.setConfig(config_);
+        std::cout << "Collision merging abilitato (threshold: " << config_.collisionDistanceThreshold 
+                  << " m)\n";
+        return;
+    }
+
+    if (input == "collision off") {
+        config_.enableCollisionMerging = false;
+        physics_.setConfig(config_);
+        std::cout << "Collision merging disabilitato\n";
+        return;
+    }
+
+    if (input == "collision") {
+        std::cout << "Collision merging config:\n"
+                  << "  enabled: " << (config_.enableCollisionMerging ? "si" : "no") << "\n"
+                  << "  threshold: " << config_.collisionDistanceThreshold << " m\n";
         return;
     }
 
@@ -537,20 +575,20 @@ void Application::printCommandBoard() const {
               << "  +            -> raddoppia velocita simulazione\n"
               << "  -            -> dimezza velocita simulazione\n"
               << "  st           -> mostra stato corrente\n"
-              << "  m            -> mostra metriche fisiche (energia e momento)\n"
+              << "  m            -> mostra metriche fisiche complete (E,P,L,CM,drift,a_max)\n"
               << "  hub          -> guida hub interattivo (metriche live separate)\n"
               << "  hub on/off   -> abilita/disabilita HUD live\n"
               << "  hub show/hide <overview|kin|distance|energy|all>\n"
               << "  hub toggle <overview|kin|distance|energy|all>  -> toggle singolo pannello\n"
               << "  hub toggle-all   -> toggle on/off HUD\n"
               << "  hub status   -> stato hub corrente\n"
-              << "  phys <mode>  -> cambia modello fisico: newton | galileo | rel | hybrid\n"
+              << "  phys <mode>  -> cambia modello fisico: newton | rel | hybrid\n"
               << "  r            -> ricarica lo scenario dal file\n"
               << "  load <nome>  -> carica uno scenario da objects/scenarios/<nome>.txt\n"
               << "  gfx ascii    -> usa renderer ASCII in terminale\n"
               << "  gfx opengl   -> usa renderer OpenGL in finestra\n"
-              << "  w            -> scorciatoia per entrare in finestra OpenGL\n"
-              << "  h            -> mostra questa guida\n"
+              << "  w            -> scorciatoia per entrare in finestra OpenGL\n"              << "  collision    -> mostra config collision\n"
+              << "  collision on/off -> abilita/disabilita collision merging\n"              << "  h            -> mostra questa guida\n"
               << "  q            -> esci\n"
               << "Hotkeys visuale in finestra OpenGL:\n"
               << "  2D: frecce=pan, U/O=zoom, C=reset camera\n"
@@ -571,6 +609,10 @@ void Application::printStatus() const {
               << "  corpi attivi: " << world_.bodies().size() << "\n"
               << "  assorbimenti totali: " << totalAbsorbedBodies_ << "\n"
               << "  massa assorbita totale: " << totalAbsorbedMass_ << "\n"
+              << "  E totale: " << lastDiagnostics_.totalEnergy << "\n"
+              << "  virial ratio: " << lastDiagnostics_.virialRatio << "\n"
+              << "  a max: " << lastDiagnostics_.maxAcceleration << "\n"
+              << "  d min: " << lastDiagnostics_.minDistance << "\n"
               << "  hub: " << render::hud::summary() << "\n";
 
     for (const auto& body : world_.bodies()) {
@@ -582,38 +624,47 @@ void Application::printStatus() const {
 }
 
 void Application::printMetrics() const {
-    const auto& bodies = world_.bodies();
-    double kineticEnergy = 0.0;
-    double potentialEnergy = 0.0;
-    core::Vec3 totalMomentum{};
-
-    for (const auto& body : bodies) {
-        const double speedSq = body.velocity.lengthSquared();
-        kineticEnergy += 0.5 * body.mass * speedSq;
-        totalMomentum += body.velocity * body.mass;
-    }
-
-    for (std::size_t i = 0; i < bodies.size(); ++i) {
-        for (std::size_t j = i + 1; j < bodies.size(); ++j) {
-            const core::Vec3 delta = bodies[j].position - bodies[i].position;
-            const double distance = std::sqrt(delta.lengthSquared() + config_.softeningLengthSquared);
-            if (distance <= 0.0) {
-                continue;
-            }
-
-            potentialEnergy -= (config_.gravitationalConstant * bodies[i].mass * bodies[j].mass) / distance;
-        }
-    }
-
-    const double totalEnergy = kineticEnergy + potentialEnergy;
-
+    const auto diagnostics = physics_.measure(world_);
     std::cout << std::setprecision(10)
               << "Metriche fisiche:\n"
-              << "  energia cinetica: " << kineticEnergy << "\n"
-              << "  energia potenziale: " << potentialEnergy << "\n"
-              << "  energia totale: " << totalEnergy << "\n"
-              << "  momento totale: (" << totalMomentum.x << ", "
-              << totalMomentum.y << ", " << totalMomentum.z << ")\n";
+              << "  modello: " << gravityModelName(config_.gravityModel) << "\n"
+              << "  massa totale: " << diagnostics.totalMass << "\n"
+              << "  energia cinetica: " << diagnostics.kineticEnergy << "\n"
+              << "  energia potenziale: " << diagnostics.potentialEnergy << "\n"
+              << "  energia totale: " << diagnostics.totalEnergy << "\n"
+              << "  rapporto viriale: " << diagnostics.virialRatio << "\n"
+              << "  momento totale: (" << diagnostics.totalMomentum.x << ", "
+              << diagnostics.totalMomentum.y << ", " << diagnostics.totalMomentum.z << ")\n"
+              << "  momento angolare totale: (" << diagnostics.totalAngularMomentum.x << ", "
+              << diagnostics.totalAngularMomentum.y << ", " << diagnostics.totalAngularMomentum.z << ")\n"
+              << "  centro di massa: (" << diagnostics.centerOfMass.x << ", "
+              << diagnostics.centerOfMass.y << ", " << diagnostics.centerOfMass.z << ")\n"
+              << "  velocita CM: (" << diagnostics.centerOfMassVelocity.x << ", "
+              << diagnostics.centerOfMassVelocity.y << ", " << diagnostics.centerOfMassVelocity.z << ")\n"
+              << "  d_min: " << diagnostics.minDistance << "\n"
+              << "  v_max: " << diagnostics.maxSpeed << "\n"
+              << "  a_max: " << diagnostics.maxAcceleration << "\n";
+
+    if (diagnosticsReferenceSet_) {
+        const double e0 = std::max(std::abs(diagnosticsReference_.totalEnergy), 1e-30);
+        const double driftE = (diagnostics.totalEnergy - diagnosticsReference_.totalEnergy) / e0;
+
+        const core::Vec3 dp = diagnostics.totalMomentum - diagnosticsReference_.totalMomentum;
+        const core::Vec3 dl = diagnostics.totalAngularMomentum - diagnosticsReference_.totalAngularMomentum;
+
+        std::cout << "  drift energia relativo: " << driftE << "\n"
+                  << "  drift momento: (" << dp.x << ", " << dp.y << ", " << dp.z << ")\n"
+                  << "  drift momento angolare: (" << dl.x << ", " << dl.y << ", " << dl.z << ")\n";
+    } else {
+        std::cout << "  drift: riferimento non ancora inizializzato\n";
+    }
+
+}
+
+void Application::resetDiagnosticsReference() {
+    lastDiagnostics_ = physics_.measure(world_);
+    diagnosticsReference_ = lastDiagnostics_;
+    diagnosticsReferenceSet_ = !world_.bodies().empty();
 }
 
 } // namespace spacesim::app

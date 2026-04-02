@@ -1,3 +1,3 @@
 # name kind mass px py pz vx vy vz static eventHorizonRadius
 BlackHole1 blackhole 6.6e24 -5e11 0 0 0 0 469 false 3000
-BlackHole2 blackhole 6.6e24 5e11 0 0 0 0 469 false 3000
+BlackHole2 blackhole 6.6e24 5e11 0 0 0 0 -469 false 3000

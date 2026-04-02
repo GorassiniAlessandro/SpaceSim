@@ -600,15 +600,28 @@ void Renderer3DOpenGL::render(const core::World& world) {
     }
 
     glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    int renderedDynamicBodies = 0;
-    for (const auto& body : bodies) {
-        if (body.isStatic) {
-            continue;
+    std::vector<std::size_t> dynamicOrder;
+    dynamicOrder.reserve(bodies.size());
+    for (std::size_t i = 0; i < bodies.size(); ++i) {
+        if (!bodies[i].isStatic) {
+            dynamicOrder.push_back(i);
         }
-        if (renderedDynamicBodies >= 6) {
-            break;
-        }
+    }
+    std::sort(dynamicOrder.begin(), dynamicOrder.end(), [&](std::size_t lhs, std::size_t rhs) {
+        return bodies[lhs].mass > bodies[rhs].mass;
+    });
+
+    const std::size_t vectorBodyLimit = std::min<std::size_t>(4, dynamicOrder.size());
+    const float trajectoryAlpha = 0.38f;
+    const float trajectoryWidth = 1.4f;
+    const int predictionSteps = 96;
+
+    for (std::size_t renderedDynamicBodies = 0; renderedDynamicBodies < vectorBodyLimit; ++renderedDynamicBodies) {
+        const auto bodyIndex = dynamicOrder[renderedDynamicBodies];
+        const auto& body = bodies[bodyIndex];
 
         const float x = static_cast<float>((body.position.x - centerX) * inv);
         const float y = static_cast<float>((body.position.y - centerY) * inv);
@@ -617,11 +630,16 @@ void Renderer3DOpenGL::render(const core::World& world) {
         const core::Vec3 relVelocity = body.velocity - comVelocity;
         const core::Vec3 accelNow = computeAccelAt(body, body.position, body.velocity);
 
-        // Lunghezze vettori in unita schermo con scala adattiva e minimo visibile.
+        // Lunghezze vettori in unita schermo con scala adattiva e compressione non lineare.
         const double speedRatio = relVelocity.length() / maxSpeed;
         const double accelRatio = accelNow.length() / maxAccel;
-        const float velLen = static_cast<float>(std::max(0.10, 0.45 * speedRatio));
-        const float accLen = static_cast<float>(std::max(0.10, 0.45 * accelRatio));
+        const auto compressedLength = [](double ratio, float minLen, float maxLen) {
+            const double clamped = std::clamp(ratio, 0.0, 1.0);
+            const double eased = std::sqrt(clamped);
+            return minLen + static_cast<float>((maxLen - minLen) * eased);
+        };
+        const float velLen = compressedLength(speedRatio, 0.10f, 0.36f);
+        const float accLen = compressedLength(accelRatio, 0.10f, 0.30f);
 
         core::Vec3 velDir = relVelocity;
         const double velMag = velDir.length();
@@ -637,7 +655,7 @@ void Renderer3DOpenGL::render(const core::World& world) {
 
         // Vettore velocita (verde)
         glLineWidth(2.0f);
-        glColor3f(0.2f, 1.0f, 0.2f);
+        glColor4f(0.25f, 1.0f, 0.35f, 0.92f);
         drawArrow(
             x,
             y,
@@ -648,7 +666,7 @@ void Renderer3DOpenGL::render(const core::World& world) {
             0.06f);
 
         // Vettore accelerazione gravitazionale (rosso)
-        glColor3f(1.0f, 0.2f, 0.2f);
+        glColor4f(1.0f, 0.35f, 0.25f, 0.88f);
         drawArrow(
             x,
             y,
@@ -665,12 +683,13 @@ void Renderer3DOpenGL::render(const core::World& world) {
         const double r = (body.position - core::Vec3{centerX, centerY, centerZ}).length();
         const double v = std::max(body.velocity.length(), 1.0);
         const double orbitalPeriodEstimate = std::max((2.0 * 3.1415926535 * r) / v, 3600.0);
-        const double horizonTime = std::min(orbitalPeriodEstimate * 0.60, 365.0 * 24.0 * 3600.0);
-        const int predictionSteps = 220;
+            const double horizonTime = std::min(orbitalPeriodEstimate * 0.22, 120.0 * 24.0 * 3600.0);
         const double dtPred = horizonTime / static_cast<double>(predictionSteps);
 
-        glColor3f(0.50f, 0.80f, 1.00f);
-        glLineWidth(2.0f);
+            glEnable(GL_LINE_STIPPLE);
+            glLineStipple(1, 0x0F0F);
+            glColor4f(0.55f, 0.80f, 1.00f, trajectoryAlpha);
+            glLineWidth(trajectoryWidth);
         glBegin(GL_LINE_STRIP);
         glVertex3f(x, y, z);
         for (int step = 0; step < predictionSteps; ++step) {
@@ -685,10 +704,10 @@ void Renderer3DOpenGL::render(const core::World& world) {
         }
         glEnd();
         glLineWidth(1.0f);
-
-        renderedDynamicBodies++;
+        glDisable(GL_LINE_STIPPLE);
     }
 
+    glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
 
     glfwSwapBuffers(impl_->window);

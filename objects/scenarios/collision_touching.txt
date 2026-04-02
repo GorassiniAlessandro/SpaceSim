@@ -1,0 +1,5 @@
+# Direct Collision Test: Bodies ALREADY touching at start
+# Two stars at 500m distance (well within 20km threshold), velocities zero
+# name kind mass px py pz vx vy vz static eventHorizonRadius
+Star_1 star 5.0e29 -250 0 0 0 0 0 false 0
+Star_2 star 3.0e29 250 0 0 0 0 0 false 0

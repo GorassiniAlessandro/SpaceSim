@@ -1,0 +1,5 @@
+# Collision Test: Bodies within threshold initially
+# Two stars at 10 km distance (< 20 km threshold), approaching
+# name kind mass px py pz vx vy vz static eventHorizonRadius
+Star_1 star 5.0e29 -5000 0 0 10000 0 0 false 0
+Star_2 star 3.0e29 5000 0 0 -10000 0 0 false 0

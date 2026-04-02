@@ -1,0 +1,5 @@
+# Collision Test: Solar-scale masses + solar-scale distances
+# Two solar-mass stars separated by 1 billion km, approaching at 30 km/s each
+# name kind mass px py pz vx vy vz static eventHorizonRadius
+Star_Solar_1 star 1.989e30 -5e11 0 0 30000 0 0 false 0
+Star_Solar_2 star 1.989e30 5e11 0 0 -30000 0 0 false 0

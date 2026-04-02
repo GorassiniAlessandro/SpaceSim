@@ -1,0 +1,6 @@
+# Collision Test: Much larger masses + controlled convergent velocities
+# Two massive stars separated by 100 km, approaching each other at 5 km/s
+# Large masses ensure strong gravity pulls them together
+# name kind mass px py pz vx vy vz static eventHorizonRadius
+Star_Heavy_1 star 1.0e31 -5e4 0 0 5000 0 0 false 0
+Star_Heavy_2 star 1.0e31 5e4 0 0 -5000 0 0 false 0

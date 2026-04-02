@@ -1,0 +1,6 @@
+# Two-Body Collision Test
+# Two asteroids on collision course - will merge upon impact
+# Distance between bodies set to trigger collision with threshold of 20km
+# name kind mass px py pz vx vy vz static eventHorizonRadius
+Asteroid_A asteroid 1.0e20 -2e10 0 0 15000 0 0 false 0
+Asteroid_B asteroid 8.0e19 2e10 0 0 -15000 0 0 false 0

@@ -1,0 +1,8 @@
+# Five-Body Chaotic System (3D Configuration)
+# Non-coplanar configuration to test full 3D stability
+# name kind mass px py pz vx vy vz static eventHorizonRadius
+Core star 3.0e30 0 0 0 0 0 0 false 0
+Body_1 star 1.5e30 5e10 2e10 3e10 -12000 15000 8000 false 0
+Body_2 star 1.2e30 -4e10 5e10 -2e10 18000 -10000 5000 false 0
+Body_3 star 9.0e29 3e10 -6e10 1e10 8000 12000 -15000 false 0
+Body_4 star 6.0e29 -2e10 -1e10 7e10 -5000 -8000 10000 false 0

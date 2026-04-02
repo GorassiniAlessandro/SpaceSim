@@ -38,6 +38,7 @@ private:
     void printCommandBoard() const;
     void printStatus() const;
     void printMetrics() const;
+    void resetDiagnosticsReference();
 
     core::SimulationConfig config_;
     core::World world_;
@@ -53,6 +54,9 @@ private:
     std::string currentScenario_;
     std::size_t totalAbsorbedBodies_;
     double totalAbsorbedMass_;
+    bool diagnosticsReferenceSet_;
+    core::SystemDiagnostics diagnosticsReference_;
+    core::SystemDiagnostics lastDiagnostics_;
 };
 
 } // namespace spacesim::app

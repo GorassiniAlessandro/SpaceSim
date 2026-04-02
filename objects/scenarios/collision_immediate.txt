@@ -1,0 +1,6 @@
+# Immediate Collision Test
+# Bodies already overlapping (distance 1 km < 20 km threshold)
+# Should merge on first step
+# name kind mass px py pz vx vy vz static eventHorizonRadius
+Star_1 star 5.0e29 -5e3 0 0 5000 0 0 false 0
+Star_2 star 3.0e29 5e3 0 0 -5000 0 0 false 0

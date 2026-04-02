@@ -6,7 +6,6 @@ namespace spacesim::core {
 
 enum class GravityModel {
     Newtonian,
-    Galilean,
     Relativistic,
     Hybrid
 };
@@ -24,15 +23,21 @@ struct SimulationConfig {
     
     GravityModel gravityModel = GravityModel::Newtonian;
 
-    // Galileo-style uniform gravitational field (e.g. near-planet approximation).
-    Vec3 galileanField{0.0, -9.81, 0.0};
-
     // Speed of light for relativistic correction term.
     double lightSpeed = 299792458.0;
     
-    // Fattore di damping numerico (0.0-1.0): riduce drift energetico senza affettare fis
-    // 0.9999 = minimo damping, 0.99 = moderato
-    double numericalDampingFactor = 0.9999;
+    // Fattore di damping numerico opzionale.
+    // Per un Newtoniano conservativo la scelta corretta e' 1.0.
+    double numericalDampingFactor = 1.0;
+
+    // Collision handling: distance threshold for merging (in meters)
+    // Bodies merge if center-to-center distance <= collisionDistanceThreshold
+    // Typical value: ~2.0 * sqrt(softeningLengthSquared)
+    // For stellar scales: 1e9 m (1 million km) is reasonable
+    double collisionDistanceThreshold = 1.0e9;  // 1 billion meters (1 million km)
+    
+    // Enable/disable collision merging
+    bool enableCollisionMerging = true;
 };
 
 } // namespace spacesim::core

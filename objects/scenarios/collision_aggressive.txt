@@ -1,0 +1,6 @@
+# Aggressive Collision Test - Bodies very close, high relative velocity
+# Initial separation: 50 km, velocities: 30 km/s each (opposite direction)
+# Collision threshold: 20 km -> will merge after ~1 step
+# name kind mass px py pz vx vy vz static eventHorizonRadius
+Asteroid_A asteroid 1.0e20 -2.5e4 0 0 30000 0 0 false 0
+Asteroid_B asteroid 8.0e19 2.5e4 0 0 -30000 0 0 false 0

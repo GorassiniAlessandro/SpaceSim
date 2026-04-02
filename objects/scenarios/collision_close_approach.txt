@@ -1,0 +1,5 @@
+# Collision Test: Bodies start very close, massive + approaching
+# Two solar-mass stars separated by 10 million km, approaching at 50 km/s each  
+# name kind mass px py pz vx vy vz static eventHorizonRadius
+Star_A star 1.989e30 -5e9 0 0 50000 0 0 false 0
+Star_B star 1.989e30 5e9 0 0 -50000 0 0 false 0

@@ -122,7 +122,7 @@ Durante `make run` puoi controllare la simulazione con questi comandi:
 - `-`: dimezza la velocita simulazione
 - `st`: stampa stato corrente (renderer, pausa, timeScale, dt, numero corpi)
 - `m` oppure `metrics`: stampa energia cinetica/potenziale/totale e momento totale
-- `phys <mode>`: cambia modello fisico (`newton`, `galileo`, `rel`, `hybrid`)
+- `phys <mode>`: cambia modello fisico (`newton`, `rel`, `hybrid`)
 - `r`: ricarica lo scenario da file
 - `load <nome>`: carica `objects/scenarios/<nome>.txt` (esempio: `load binary_system`)
 - `gfx ascii`: usa il renderer ASCII in terminale
